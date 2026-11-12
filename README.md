@@ -44,6 +44,7 @@ pnpm check        # typecheck, lint, format check, tests, frontend build
 
 ```bash
 pnpm build        # once, so the Worker has frontend assets to serve
+pnpm --filter @avs/api db:migrate:local   # once, and after each new migration
 pnpm dev          # Worker on http://127.0.0.1:8787 and Vite on http://localhost:5173
 ```
 
@@ -110,7 +111,7 @@ See `docs/API.md` for the planned endpoints.
 
 - [x] 1. Repository foundation
 - [x] 2. Cloudflare foundation (Wrangler, D1, R2, Workflows, local development)
-- [ ] 3. Database (nine tables, migrations, repository functions)
+- [x] 3. Database (nine tables, migrations, repository functions)
 - [ ] 4. API foundation (project CRUD, validation, errors, authentication)
 - [ ] 5. Project dashboard
 - [ ] 6. Director and creative agents

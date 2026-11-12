@@ -30,3 +30,65 @@ export const LIMITS = {
   maxProjectScenes: 20,
   maxGenerationRetriesPerScene: 3,
 } as const;
+
+/**
+ * Lifecycle states. The database enforces the same lists with CHECK constraints
+ * (workers/api/migrations); a test fails if the two drift apart.
+ */
+export const PROJECT_STATUSES = [
+  "created",
+  "planning",
+  "generating",
+  "awaiting_render",
+  "rendering",
+  "quality_check",
+  "completed",
+  "failed",
+  "cancelled",
+] as const;
+export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
+
+export const SCENE_STATUSES = ["pending", "generating", "ready", "failed", "skipped"] as const;
+export type SceneStatus = (typeof SCENE_STATUSES)[number];
+
+export const SCENE_VISUAL_TYPES = ["image", "video", "animation", "text"] as const;
+export type SceneVisualType = (typeof SCENE_VISUAL_TYPES)[number];
+
+/** `queued` → `running` → `completed` | `failed` | `cancelled`. A failed attempt with retries
+ * left goes back to `queued`. */
+export const JOB_STATUSES = ["queued", "running", "completed", "failed", "cancelled"] as const;
+export type JobStatus = (typeof JOB_STATUSES)[number];
+
+export const WORKFLOW_RUN_STATUSES = [
+  "queued",
+  "running",
+  "waiting",
+  "completed",
+  "failed",
+  "cancelled",
+] as const;
+export type WorkflowRunStatus = (typeof WORKFLOW_RUN_STATUSES)[number];
+
+export const QUALITY_STATUSES = ["passed", "warning", "failed"] as const;
+export type QualityStatus = (typeof QUALITY_STATUSES)[number];
+
+export const PROVIDER_HEALTH_STATUSES = ["unknown", "healthy", "degraded", "down"] as const;
+export type ProviderHealthStatus = (typeof PROVIDER_HEALTH_STATUSES)[number];
+
+export const PROVIDER_CAPABILITIES = ["text", "image", "video", "voice", "music"] as const;
+export type ProviderCapability = (typeof PROVIDER_CAPABILITIES)[number];
+
+export const ASSET_TYPES = [
+  "image",
+  "video",
+  "audio",
+  "voiceover",
+  "music",
+  "subtitle",
+  "thumbnail",
+  "render",
+] as const;
+export type AssetType = (typeof ASSET_TYPES)[number];
+
+/** Default retry policy for jobs (overridable per job, capped at the DB level at 10). */
+export const JOB_RETRY_POLICY = { defaultMaxRetries: 3, hardMaxRetries: 10 } as const;

@@ -54,3 +54,17 @@ keeps the app shell usable while making misconfiguration visible.
 `ProductionWorkflow` validates its input and returns `status: "not_implemented"`. **Why:** the
 binding and class must exist to be configured and tested now; the real steps arrive in Task 7, and
 the stub says so instead of pretending to produce video.
+
+## 011. Schema follows the blueprint, with stricter constraints (2026-11-12)
+
+The nine tables match the blueprint. Additions: CHECK constraints on every status, enum and JSON
+column; a `max_retries` column on `jobs` (CLAUDE.md rule 8: every job has a retry policy); ISO-8601
+millisecond timestamps instead of `CURRENT_TIMESTAMP` (consistent with application-written times);
+`ON DELETE CASCADE` from users to projects; two extra indexes (usage by provider, quality by project).
+**Why:** the database should reject states the application never intends to write.
+
+## 012. Ownership enforced in SQL, not in a separate check (2026-11-12)
+
+Project-scoped repository functions filter by `userId` in the same statement that reads or writes.
+**Why:** no time-of-check/time-of-use gap, and forgetting a check fails closed (returns nothing)
+instead of leaking another user's data. A test that disables the filter makes six tests fail.

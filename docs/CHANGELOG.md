@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0 (2026-11-12)
+
+- Task 3: migration `0001_initial_schema.sql` (nine tables, indexes, CHECK constraints) and typed
+  repository functions for every table, with ownership enforced in SQL, Zod-validated JSON, job
+  retry policy and transactional storyboard replacement. 28 new tests.
+
 ## 0.2.0 (2026-11-12)
 
 - Task 2: D1, R2 and Workflows bindings; health endpoint reports binding status; stub
