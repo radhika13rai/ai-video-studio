@@ -1,0 +1,24 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "ai-video-studio",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+
+  // The built frontend is served by the same Worker; /api/* always reaches the Worker first.
+  // Run `pnpm build` once before `wrangler dev` or `wrangler deploy` so this directory exists.
+  "assets": {
+    "directory": "../../apps/studio/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"],
+  },
+
+  "observability": { "enabled": true },
+
+  "vars": {
+    "APP_ENV": "development",
+  },
+
+  // D1, R2 and Workflows bindings are added in Task 2, once the resources exist.
+  // Resource IDs are never invented here.
+}
