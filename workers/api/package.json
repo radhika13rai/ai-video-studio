@@ -16,7 +16,8 @@
   "dependencies": {
     "@avs/contracts": "workspace:*",
     "@avs/schemas": "workspace:*",
-    "@avs/types": "workspace:*"
+    "@avs/types": "workspace:*",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.8.1"
