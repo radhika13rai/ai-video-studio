@@ -14,7 +14,7 @@ describe("GET /api/v1/health", () => {
     expect(res.headers.get("content-type")).toContain("application/json");
     const { data } = healthBody.parse(await res.json());
     expect(data.status).toBe("ok");
-    expect(data.environment).toBe("development");
+    expect(data.environment).toBe("test");
     expect(data.bindings.database.status).toBe("ok");
     expect(data.bindings.storage.status).toBe("ok");
     expect(data.bindings.workflows.status).toBe("ok");

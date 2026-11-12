@@ -68,3 +68,21 @@ millisecond timestamps instead of `CURRENT_TIMESTAMP` (consistent with applicati
 Project-scoped repository functions filter by `userId` in the same statement that reads or writes.
 **Why:** no time-of-check/time-of-use gap, and forgetting a check fails closed (returns nothing)
 instead of leaking another user's data. A test that disables the filter makes six tests fail.
+
+## 013. A small in-house router instead of a framework (2026-11-12)
+
+Resolves ADR 005. `src/lib/router.ts` (about 50 lines) handles `:param` patterns, 404 and 405 with
+`Allow`. **Why:** a dozen routes don't need a dependency, and validation, auth and errors are
+already explicit functions. Revisit if routes or middleware grow a lot.
+
+## 014. Fail-closed authentication (2026-11-12)
+
+Cloudflare Access JWTs are verified in the Worker with WebCrypto (no JWT library). `APP_ENV`
+defaults to `production`, where missing Access settings reject every API call; the developer
+identity exists only in `development` and `test`. **Why:** a misconfigured deploy must not become
+an open API.
+
+## 015. Idempotency keys stored in D1 (2026-11-12)
+
+`POST /projects` honours `Idempotency-Key` using a reservation row (migration 0002). **Why:** mobile
+retries shouldn't create duplicate projects; D1 is already there, so no new service is needed.

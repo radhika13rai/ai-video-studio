@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.0 (2026-11-12)
+
+- Task 4: project API (`/me`, create, list, get, patch, delete, scenes, jobs, assets, quality),
+  Cloudflare Access JWT verification with a local developer identity, fail-closed production
+  default, shared error envelope with new codes, 64 KB JSON limit, Idempotency-Key support
+  (migration 0002), small router. 24 new tests.
+
 ## 0.3.0 (2026-11-12)
 
 - Task 3: migration `0001_initial_schema.sql` (nine tables, indexes, CHECK constraints) and typed

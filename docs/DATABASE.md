@@ -5,17 +5,18 @@ Data access: `workers/api/src/db/` (the only code that writes SQL).
 
 ## Tables
 
-| Table             | Holds                                                        | Deleted with project     |
-| ----------------- | ------------------------------------------------------------ | ------------------------ |
-| `users`           | One row per verified identity (email, unique)                | n/a                      |
-| `projects`        | The video request, its settings, status and config JSON      | n/a                      |
-| `scenes`          | The storyboard: one row per scene, unique per `scene_number` | yes (cascade)            |
-| `jobs`            | Agent work items with status and retry policy                | yes (cascade)            |
-| `assets`          | Metadata for media stored in R2 (`storage_key`), never bytes | yes (cascade)            |
-| `providers`       | Provider routing registry (enabled, priority, health, quota) | n/a (global)             |
-| `workflow_runs`   | Durable workflow executions and their current step           | yes (cascade)            |
-| `usage_events`    | Provider usage for free-tier quota tracking                  | no (`project_id` → NULL) |
-| `quality_reports` | QC results: status, score, checks, recommendations           | yes (cascade)            |
+| Table              | Holds                                                         | Deleted with project     |
+| ------------------ | ------------------------------------------------------------- | ------------------------ |
+| `users`            | One row per verified identity (email, unique)                 | n/a                      |
+| `projects`         | The video request, its settings, status and config JSON       | n/a                      |
+| `scenes`           | The storyboard: one row per scene, unique per `scene_number`  | yes (cascade)            |
+| `jobs`             | Agent work items with status and retry policy                 | yes (cascade)            |
+| `assets`           | Metadata for media stored in R2 (`storage_key`), never bytes  | yes (cascade)            |
+| `providers`        | Provider routing registry (enabled, priority, health, quota)  | n/a (global)             |
+| `workflow_runs`    | Durable workflow executions and their current step            | yes (cascade)            |
+| `usage_events`     | Provider usage for free-tier quota tracking                   | no (`project_id` → NULL) |
+| `quality_reports`  | QC results: status, score, checks, recommendations            | yes (cascade)            |
+| `idempotency_keys` | Stored POST responses for safe retries (24 h, migration 0002) | with the user            |
 
 ## Rules
 

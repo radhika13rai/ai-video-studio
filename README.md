@@ -101,18 +101,24 @@ Base path: `/api/v1`. Every response uses one envelope:
 { "success": false, "error": { "code": "NOT_FOUND", "message": "…", "retryable": false } }
 ```
 
-| Method | Endpoint  | Status                                                   |
-| ------ | --------- | -------------------------------------------------------- |
-| GET    | `/health` | Implemented; reports D1, R2 and Workflows binding status |
+| Method               | Endpoint                                               | Status                                                     |
+| -------------------- | ------------------------------------------------------ | ---------------------------------------------------------- |
+| GET                  | `/health`                                              | Public; reports D1, R2 and Workflows binding status        |
+| GET                  | `/me`                                                  | The signed-in user                                         |
+| POST / GET           | `/projects`                                            | Create (supports `Idempotency-Key`) / list with pagination |
+| GET / PATCH / DELETE | `/projects/:id`                                        | Read, rename or change style, delete with its media        |
+| GET                  | `/projects/:id/scenes`, `/jobs`, `/assets`, `/quality` | Read-only collections                                      |
 
-See `docs/API.md` for the planned endpoints.
+See `docs/API.md` for details and `docs/SECURITY.md` for sign-in. Locally you are signed in as
+developer@example.com; send `X-Dev-User: someone@example.com` to act as another user. A deploy
+rejects API calls until Cloudflare Access is configured.
 
 ## Implementation tasks
 
 - [x] 1. Repository foundation
 - [x] 2. Cloudflare foundation (Wrangler, D1, R2, Workflows, local development)
 - [x] 3. Database (nine tables, migrations, repository functions)
-- [ ] 4. API foundation (project CRUD, validation, errors, authentication)
+- [x] 4. API foundation (project CRUD, validation, errors, authentication)
 - [ ] 5. Project dashboard
 - [ ] 6. Director and creative agents
 - [ ] 7. Workflow orchestration

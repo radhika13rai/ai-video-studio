@@ -4,6 +4,7 @@ import { fail, ok } from "@avs/contracts";
 const JSON_HEADERS = {
   "content-type": "application/json; charset=utf-8",
   "cache-control": "no-store",
+  "x-content-type-options": "nosniff",
 } as const;
 
 export function jsonOk<T>(data: T, status = 200): Response {
