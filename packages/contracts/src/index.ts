@@ -48,4 +48,4 @@ export function fail(code: ErrorCode, message: string, retryable = false): ApiFa
   return { success: false, error: { code, message, retryable } };
 }
 
-export type { CreateProjectRequest, HealthData } from "@avs/schemas";
+export type { BindingCheck, CreateProjectRequest, HealthData } from "@avs/schemas";

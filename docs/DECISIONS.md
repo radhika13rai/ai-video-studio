@@ -29,7 +29,28 @@ Revisit in Task 4 when project CRUD arrives.
 
 **Why:** typescript-eslint 8 refuses to run on TypeScript 7. Unpin when it supports it.
 
-## 007. Worker tests run in Node (2026-11-12)
+## 007. Worker tests run in workerd (revised 2026-11-12)
 
-Tests call the Worker's `fetch` handler directly under Vitest. **Why:** fast and dependency-free
-while there are no bindings. Move to the Workers Vitest pool when D1 and R2 arrive in Task 2–3.
+Originally the Worker was tested in Node. Since Task 2 its tests run under
+`@cloudflare/vitest-plugin` inside workerd, with real local D1, R2 and Workflows from
+`wrangler.jsonc`. **Why:** the Worker imports `cloudflare:workers`, which Node can't load, and
+binding behaviour should be tested against the real runtime. (`vitest-pool-workers` is deprecated and
+requires Vitest 4.)
+
+## 008. Placeholder D1 ID, guarded at deploy (2026-11-12)
+
+`wrangler.jsonc` ships with `database_id: "REPLACE_WITH_DATABASE_ID"`. **Why:** resource IDs must not
+be invented, and local development doesn't need one. `scripts/validate-env.sh` blocks deploys until
+it is replaced.
+
+## 009. Health reports bindings, always 200 (2026-11-12)
+
+`/api/v1/health` probes D1 (`SELECT 1`), R2 (`head`) and checks the Workflow binding, reporting each
+as `ok`, `missing` or `error`, and an overall `ok` or `degraded`. **Why:** a 200 with a degraded body
+keeps the app shell usable while making misconfiguration visible.
+
+## 010. Production workflow is a stub until Task 7 (2026-11-12)
+
+`ProductionWorkflow` validates its input and returns `status: "not_implemented"`. **Why:** the
+binding and class must exist to be configured and tested now; the real steps arrive in Task 7, and
+the stub says so instead of pretending to produce video.

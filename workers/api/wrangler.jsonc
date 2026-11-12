@@ -15,10 +15,37 @@
 
   "observability": { "enabled": true },
 
+  // Local development (`wrangler dev`) simulates D1 and R2 on disk under .wrangler/state.
+  // Before the first deploy, create the real resources and paste the D1 id below
+  // (see README, "Create the Cloudflare resources"). scripts/validate-env.sh refuses to
+  // deploy while the placeholder is still here. Resource IDs are never invented.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "ai-video-studio",
+      "database_id": "REPLACE_WITH_DATABASE_ID",
+      "migrations_dir": "migrations",
+    },
+  ],
+
+  "r2_buckets": [
+    {
+      "binding": "MEDIA",
+      "bucket_name": "ai-video-studio-media",
+    },
+  ],
+
+  "workflows": [
+    {
+      "name": "production-workflow",
+      "binding": "PRODUCTION_WORKFLOW",
+      "class_name": "ProductionWorkflow",
+    },
+  ],
+
   "vars": {
     "APP_ENV": "development",
+    "MAX_VIDEO_DURATION": "60",
+    "MAX_PROJECT_SCENES": "20",
   },
-
-  // D1, R2 and Workflows bindings are added in Task 2, once the resources exist.
-  // Resource IDs are never invented here.
 }
