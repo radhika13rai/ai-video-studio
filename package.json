@@ -1,0 +1,34 @@
+{
+  "name": "ai-video-studio",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Universal, autonomous AI video production platform",
+  "type": "module",
+  "packageManager": "pnpm@10.28.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter @avs/api --filter @avs/studio dev",
+    "dev:api": "pnpm --filter @avs/api dev",
+    "dev:web": "pnpm --filter @avs/studio dev",
+    "build": "pnpm --filter @avs/studio build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "pnpm -r test",
+    "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test && pnpm build"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261112.1",
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.14.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "prettier": "^3.10.1",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.72.2",
+    "vitest": "^5.1.0",
+    "wrangler": "^4.160.1"
+  }
+}
