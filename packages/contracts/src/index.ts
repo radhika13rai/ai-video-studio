@@ -4,14 +4,30 @@ export const API_PREFIX = "/api/v1";
 
 export const API_PATHS = {
   health: `${API_PREFIX}/health`,
+  me: `${API_PREFIX}/me`,
+  projects: `${API_PREFIX}/projects`,
+  project: (id: string) => `${API_PREFIX}/projects/${encodeURIComponent(id)}`,
+  projectScenes: (id: string) => `${API_PREFIX}/projects/${encodeURIComponent(id)}/scenes`,
+  projectJobs: (id: string) => `${API_PREFIX}/projects/${encodeURIComponent(id)}/jobs`,
+  projectAssets: (id: string) => `${API_PREFIX}/projects/${encodeURIComponent(id)}/assets`,
+  projectQuality: (id: string) => `${API_PREFIX}/projects/${encodeURIComponent(id)}/quality`,
 } as const;
+
+/** Header that makes a POST safe to retry: the same key replays the first response. */
+export const IDEMPOTENCY_HEADER = "Idempotency-Key";
 
 export const ERROR_CODES = [
   "VALIDATION_ERROR",
+  "UNSUPPORTED_MEDIA_TYPE",
+  "PAYLOAD_TOO_LARGE",
+  "UNAUTHENTICATED",
   "NOT_FOUND",
   "METHOD_NOT_ALLOWED",
   "PROJECT_NOT_FOUND",
   "ACCESS_DENIED",
+  "CONFLICT",
+  "INVALID_STATE",
+  "IDEMPOTENCY_KEY_REUSED",
   "PROVIDER_UNAVAILABLE",
   "PROVIDER_QUOTA_EXCEEDED",
   "GENERATION_FAILED",
@@ -48,4 +64,12 @@ export function fail(code: ErrorCode, message: string, retryable = false): ApiFa
   return { success: false, error: { code, message, retryable } };
 }
 
-export type { BindingCheck, CreateProjectRequest, HealthData } from "@avs/schemas";
+export type {
+  BindingCheck,
+  CreateProjectRequest,
+  HealthData,
+  Project,
+  ProjectPage,
+  UpdateProjectRequest,
+  User,
+} from "@avs/schemas";

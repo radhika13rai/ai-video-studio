@@ -43,8 +43,12 @@
     },
   ],
 
+  // APP_ENV defaults to production so a deploy fails closed: without ACCESS_TEAM_DOMAIN and
+  // ACCESS_AUD every API call except /health is rejected. `pnpm dev` overrides it to development.
   "vars": {
-    "APP_ENV": "development",
+    "APP_ENV": "production",
+    "ACCESS_TEAM_DOMAIN": "",
+    "ACCESS_AUD": "",
     "MAX_VIDEO_DURATION": "60",
     "MAX_PROJECT_SCENES": "20",
   },

@@ -27,7 +27,7 @@ const TABLES = [
   "workflow_runs",
 ];
 
-describe("migration 0001", () => {
+describe("migrations", () => {
   it("creates the nine tables and the indexes", async () => {
     const { results } = await db()
       .prepare(
@@ -35,7 +35,8 @@ describe("migration 0001", () => {
       )
       .all<{ name: string; type: string }>();
     const tables = results.filter((r) => r.type === "table" && r.name !== "d1_migrations");
-    expect(tables.map((t) => t.name).sort()).toEqual(TABLES);
+    // The nine core tables, plus idempotency_keys from migration 0002.
+    expect(tables.map((t) => t.name).sort()).toEqual([...TABLES, "idempotency_keys"].sort());
     const indexes = results.filter((r) => r.type === "index" && r.name.startsWith("idx_"));
     expect(indexes.map((i) => i.name)).toEqual(
       expect.arrayContaining([

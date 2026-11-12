@@ -1,4 +1,4 @@
-import { ASPECT_RATIOS, LIMITS, TARGET_PLATFORMS, VIDEO_TYPES } from "@avs/types";
+import { ASPECT_RATIOS, LIMITS, PROJECT_STATUSES, TARGET_PLATFORMS, VIDEO_TYPES } from "@avs/types";
 import { z } from "zod";
 
 export const bindingCheckSchema = z.object({
@@ -38,7 +38,55 @@ export const createProjectRequestSchema = z.object({
   target_platform: z.enum(TARGET_PLATFORMS).default("youtube_shorts"),
   style: z.string().trim().max(200).optional(),
 });
-export type CreateProjectRequest = z.infer<typeof createProjectRequestSchema>;
+export type CreateProjectRequest = z.input<typeof createProjectRequestSchema>;
+
+/** PATCH /api/v1/projects/:id. Status is owned by the workflow and can't be set here. */
+export const updateProjectRequestSchema = z
+  .object({
+    title: z.string().trim().min(1).max(200),
+    style: z.string().trim().max(200).nullable(),
+  })
+  .partial()
+  .strict()
+  .refine((v) => Object.keys(v).length > 0, { message: "Provide at least one field to update" });
+export type UpdateProjectRequest = z.infer<typeof updateProjectRequestSchema>;
+
+/** A project as returned by the API. */
+export const projectSchema = z.object({
+  id: z.string(),
+  user_id: z.string(),
+  title: z.string(),
+  prompt: z.string(),
+  video_type: z.enum(VIDEO_TYPES),
+  aspect_ratio: z.enum(ASPECT_RATIOS),
+  duration_seconds: z.number().int(),
+  target_platform: z.enum(TARGET_PLATFORMS),
+  status: z.enum(PROJECT_STATUSES),
+  production_config: z.record(z.string(), z.unknown()),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+export type Project = z.infer<typeof projectSchema>;
+
+export const projectPageSchema = z.object({
+  items: z.array(projectSchema),
+  next_cursor: z.string().nullable(),
+});
+export type ProjectPage = z.infer<typeof projectPageSchema>;
+
+export const listProjectsQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  cursor: z.string().max(500).optional(),
+  status: z.enum(PROJECT_STATUSES).optional(),
+});
+
+export const userSchema = z.object({
+  id: z.string(),
+  email: z.string(),
+  display_name: z.string().nullable(),
+  created_at: z.string(),
+});
+export type User = z.infer<typeof userSchema>;
 
 export const apiErrorSchema = z.object({
   code: z.string(),

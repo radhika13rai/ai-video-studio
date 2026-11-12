@@ -1,38 +1,51 @@
 import { API_PATHS, API_PREFIX } from "@avs/contracts";
+import { authenticate } from "./auth/middleware";
+import type { KeyFetcher } from "./auth/access";
 import type { Env } from "./env";
-import { jsonError } from "./lib/http";
+import { ApiError, toErrorResponse } from "./lib/errors";
+import { Router } from "./lib/router";
 import { handleHealth } from "./routes/health";
+import { registerProjectRoutes, type Ctx } from "./routes/projects";
 
 export { ProductionWorkflow } from "./workflows/production-workflow";
 
-async function handleApi(request: Request, env: Env, pathname: string): Promise<Response> {
-  if (pathname === API_PATHS.health) {
-    if (request.method !== "GET" && request.method !== "HEAD") {
-      return jsonError(405, "METHOD_NOT_ALLOWED", "Use GET for this endpoint.", false, {
+const router = new Router<Ctx>();
+registerProjectRoutes(router);
+
+async function handleApi(request: Request, env: Env, url: URL, getKeys?: KeyFetcher) {
+  // Health is public so uptime checks work without signing in.
+  if (url.pathname === API_PATHS.health) {
+    if (request.method !== "GET" && request.method !== "HEAD")
+      throw new ApiError(405, "METHOD_NOT_ALLOWED", "Use GET for this endpoint.", false, {
         allow: "GET, HEAD",
       });
-    }
-    return await handleHealth(env);
+    return handleHealth(env);
   }
-  return jsonError(404, "NOT_FOUND", `No API route matches ${pathname}.`);
+  const { handler, params } = router.match(request.method, url.pathname);
+  if (!env.DB) throw new ApiError(503, "INTERNAL_ERROR", "The database is not configured.", true);
+  const user = await authenticate(request, env, env.DB, getKeys);
+  return handler({ request, env, db: env.DB, user, url }, params);
 }
 
-export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
-    const { pathname } = new URL(request.url);
-    try {
-      if (pathname === "/api" || pathname.startsWith("/api/")) {
-        if (!pathname.startsWith(`${API_PREFIX}/`)) {
-          return jsonError(404, "NOT_FOUND", `Unknown API version. Use ${API_PREFIX}.`);
+/** Builds the Worker. Tests inject a key fetcher; production uses Cloudflare's published keys. */
+export function createWorker(deps: { getKeys?: KeyFetcher } = {}) {
+  return {
+    async fetch(request: Request, env: Env): Promise<Response> {
+      const url = new URL(request.url);
+      try {
+        if (url.pathname === "/api" || url.pathname.startsWith("/api/")) {
+          if (!url.pathname.startsWith(`${API_PREFIX}/`))
+            throw new ApiError(404, "NOT_FOUND", `Unknown API version. Use ${API_PREFIX}.`);
+          return await handleApi(request, env, url, deps.getKeys);
         }
-        return await handleApi(request, env, pathname);
+        // Everything else is the built frontend (served by the ASSETS binding when deployed).
+        if (env.ASSETS) return await env.ASSETS.fetch(request);
+        return new Response("Not found", { status: 404 });
+      } catch (err) {
+        return toErrorResponse(err);
       }
-      // Everything else is the built frontend (served by the ASSETS binding when deployed).
-      if (env.ASSETS) return env.ASSETS.fetch(request);
-      return new Response("Not found", { status: 404 });
-    } catch (err) {
-      console.error("Unhandled error", err);
-      return jsonError(500, "INTERNAL_ERROR", "Unexpected server error.", true);
-    }
-  },
-} satisfies ExportedHandler<Env>;
+    },
+  } satisfies ExportedHandler<Env>;
+}
+
+export default createWorker();
