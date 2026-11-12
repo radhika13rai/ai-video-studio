@@ -15,10 +15,15 @@ Browser (apps/studio)  ──/api/v1──▶  Worker (workers/api)  ──▶  
 - `packages/contracts`, `packages/schemas` and `packages/types` define how the parts communicate.
   Both sides import the same TypeScript source.
 
-## What exists today (Task 1)
+## What exists today (Tasks 1–2)
 
 - `GET /api/v1/health`, plus JSON 404 and 405 responses in the shared error envelope.
 - An app shell that calls the health endpoint and validates the response with Zod.
 - Shared contracts: API paths, the envelope, error codes, and the create-project request schema.
 
-D1, R2, Workflows, agents, providers and the renderer are not implemented yet.
+- Cloudflare bindings in `workers/api/wrangler.jsonc`: `DB` (D1), `MEDIA` (R2) and
+  `PRODUCTION_WORKFLOW` (Workflows, class `ProductionWorkflow`). Health probes each one.
+- `ProductionWorkflow` is a stub that validates input; its steps arrive in Task 7.
+- Worker tests run in workerd with local bindings (`@cloudflare/vitest-plugin`).
+
+The database schema, agents, providers and the renderer are not implemented yet.

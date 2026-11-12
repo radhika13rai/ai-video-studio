@@ -1,13 +1,25 @@
 import { ASPECT_RATIOS, LIMITS, TARGET_PLATFORMS, VIDEO_TYPES } from "@avs/types";
 import { z } from "zod";
 
+export const bindingCheckSchema = z.object({
+  status: z.enum(["ok", "missing", "error"]),
+  latency_ms: z.number().nonnegative().optional(),
+  detail: z.string().optional(),
+});
+export type BindingCheck = z.infer<typeof bindingCheckSchema>;
+
 /** GET /api/v1/health */
 export const healthDataSchema = z.object({
-  status: z.literal("ok"),
+  status: z.enum(["ok", "degraded"]),
   service: z.string(),
   version: z.string(),
   environment: z.string(),
   timestamp: z.string().datetime(),
+  bindings: z.object({
+    database: bindingCheckSchema,
+    storage: bindingCheckSchema,
+    workflows: bindingCheckSchema,
+  }),
 });
 export type HealthData = z.infer<typeof healthDataSchema>;
 

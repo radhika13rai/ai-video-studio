@@ -27,7 +27,12 @@ describe("createProjectRequestSchema", () => {
 
 describe("healthDataSchema", () => {
   it("requires an ISO timestamp", () => {
-    const ok = { status: "ok", service: "s", version: "1", environment: "test" };
+    const bindings = {
+      database: { status: "ok", latency_ms: 1 },
+      storage: { status: "missing" },
+      workflows: { status: "error", detail: "boom" },
+    };
+    const ok = { status: "degraded", service: "s", version: "1", environment: "test", bindings };
     expect(healthDataSchema.safeParse({ ...ok, timestamp: "yesterday" }).success).toBe(false);
     expect(healthDataSchema.safeParse({ ...ok, timestamp: new Date().toISOString() }).success).toBe(
       true,

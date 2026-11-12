@@ -12,6 +12,11 @@ describe("getHealth", () => {
       version: "0.1.0",
       environment: "test",
       timestamp: new Date().toISOString(),
+      bindings: {
+        database: { status: "ok", latency_ms: 2 },
+        storage: { status: "ok", latency_ms: 1 },
+        workflows: { status: "ok" },
+      },
     };
     await expect(getHealth(respond({ success: true, data }))).resolves.toEqual(data);
   });

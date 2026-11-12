@@ -51,7 +51,29 @@ pnpm dev          # Worker on http://127.0.0.1:8787 and Vite on http://localhost
 - **http://127.0.0.1:8787** serves the built app and the API together, as it will in production.
 - Check the API: `curl http://127.0.0.1:8787/api/v1/health`
 
-No Cloudflare account or secrets are needed for local development at this stage.
+No Cloudflare account or secrets are needed for local development. `wrangler dev` simulates D1,
+R2 and Workflows on disk under `workers/api/.wrangler/` (git-ignored). Delete that folder to reset
+local data.
+
+## Deploying to Cloudflare (needs your account)
+
+The repository never contains real resource IDs until you create them. Once, from the repo root:
+
+```bash
+pnpm --filter @avs/api exec wrangler login
+pnpm --filter @avs/api cf:create          # creates the D1 database and the R2 bucket
+```
+
+Paste the `database_id` that `wrangler d1 create` prints into `workers/api/wrangler.jsonc`,
+replacing `REPLACE_WITH_DATABASE_ID`. Then:
+
+```bash
+pnpm build
+pnpm --filter @avs/api deploy             # runs scripts/validate-env.sh first
+```
+
+`scripts/validate-env.sh` refuses to deploy while the placeholder ID is still in place. D1, R2,
+Workers and Workflows all have free tiers; check Cloudflare's current limits before relying on them.
 
 ## Scripts
 
@@ -66,6 +88,9 @@ No Cloudflare account or secrets are needed for local development at this stage.
 | `pnpm test`                         | Vitest across every package            |
 | `pnpm check`                        | All of the above                       |
 
+Worker-only (`pnpm --filter @avs/api <script>`): `deploy`, `cf:create`, `db:migrate:local`,
+`db:migrate:remote`, `types`.
+
 ## API
 
 Base path: `/api/v1`. Every response uses one envelope:
@@ -75,16 +100,16 @@ Base path: `/api/v1`. Every response uses one envelope:
 { "success": false, "error": { "code": "NOT_FOUND", "message": "…", "retryable": false } }
 ```
 
-| Method | Endpoint  | Status      |
-| ------ | --------- | ----------- |
-| GET    | `/health` | Implemented |
+| Method | Endpoint  | Status                                                   |
+| ------ | --------- | -------------------------------------------------------- |
+| GET    | `/health` | Implemented; reports D1, R2 and Workflows binding status |
 
 See `docs/API.md` for the planned endpoints.
 
 ## Implementation tasks
 
 - [x] 1. Repository foundation
-- [ ] 2. Cloudflare foundation (Wrangler, D1, R2, Workflows, local development)
+- [x] 2. Cloudflare foundation (Wrangler, D1, R2, Workflows, local development)
 - [ ] 3. Database (nine tables, migrations, repository functions)
 - [ ] 4. API foundation (project CRUD, validation, errors, authentication)
 - [ ] 5. Project dashboard

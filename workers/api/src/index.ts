@@ -3,6 +3,8 @@ import type { Env } from "./env";
 import { jsonError } from "./lib/http";
 import { handleHealth } from "./routes/health";
 
+export { ProductionWorkflow } from "./workflows/production-workflow";
+
 async function handleApi(request: Request, env: Env, pathname: string): Promise<Response> {
   if (pathname === API_PATHS.health) {
     if (request.method !== "GET" && request.method !== "HEAD") {
@@ -10,7 +12,7 @@ async function handleApi(request: Request, env: Env, pathname: string): Promise<
         allow: "GET, HEAD",
       });
     }
-    return handleHealth(env);
+    return await handleHealth(env);
   }
   return jsonError(404, "NOT_FOUND", `No API route matches ${pathname}.`);
 }

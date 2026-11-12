@@ -5,13 +5,20 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "deploy": "bash ../../scripts/validate-env.sh && wrangler deploy",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
+    "cf:create": "wrangler d1 create ai-video-studio && wrangler r2 bucket create ai-video-studio-media",
+    "types": "wrangler types --check"
   },
   "dependencies": {
     "@avs/contracts": "workspace:*",
     "@avs/schemas": "workspace:*",
     "@avs/types": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.8.1"
   }
 }
