@@ -17,10 +17,24 @@ export const API_PATHS = {
   assetContent: (projectId: string, assetId: string) =>
     `${API_PREFIX}/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/content`,
   providers: `${API_PREFIX}/providers`,
+  projectRender: (id: string) => `${API_PREFIX}/projects/${encodeURIComponent(id)}/render`,
+  projectRenderUpload: (id: string, renderRequestId: string) =>
+    `${API_PREFIX}/projects/${encodeURIComponent(id)}/render/upload?render_request_id=${encodeURIComponent(renderRequestId)}`,
+  projectRenderComplete: (id: string) =>
+    `${API_PREFIX}/projects/${encodeURIComponent(id)}/render/complete`,
+  projectRenderAbort: (id: string) =>
+    `${API_PREFIX}/projects/${encodeURIComponent(id)}/render/abort`,
 } as const;
 
 /** Header that makes a POST safe to retry: the same key replays the first response. */
 export const IDEMPOTENCY_HEADER = "Idempotency-Key";
+
+/** Largest final video the API accepts (Workers allow 100 MB request bodies on the free plan). */
+export const MAX_RENDER_BYTES = 95 * 1024 * 1024;
+
+/** Where the FFmpeg.wasm core is served from (same origin; see docs/RENDERER.md). */
+export const FFMPEG_CORE_VERSION = "0.12.10";
+export const FFMPEG_CORE_BASE = `/vendor/ffmpeg-core/${FFMPEG_CORE_VERSION}`;
 
 export const ERROR_CODES = [
   "VALIDATION_ERROR",
@@ -79,6 +93,7 @@ export type {
   Job,
   Project,
   ProviderStatus,
+  RenderManifest,
   ProjectPage,
   Scene,
   UpdateProjectRequest,

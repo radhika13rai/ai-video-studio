@@ -1,4 +1,4 @@
-# Renderer
+# @avs/renderer
 
-Browser-based rendering (FFmpeg.wasm, Canvas, captions) arrives in Task 9.
-Nothing is implemented here yet. Rendering never runs inside the Worker.
+Browser video renderer: Canvas frames, Web Audio narration mixing, WebCodecs or FFmpeg.wasm
+encoding to H.264/AAC MP4. See `docs/RENDERER.md`. Nothing here runs in the Worker.

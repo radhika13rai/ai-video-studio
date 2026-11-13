@@ -70,6 +70,7 @@ replacing `REPLACE_WITH_DATABASE_ID`. Then:
 
 ```bash
 pnpm build
+pnpm --filter @avs/api vendor:upload      # once per FFmpeg version: puts the 32 MB core in R2
 pnpm --filter @avs/api deploy             # runs scripts/validate-env.sh first
 ```
 
@@ -123,7 +124,7 @@ rejects API calls until Cloudflare Access is configured.
 - [x] 6. Director and creative agents
 - [x] 7. Workflow orchestration
 - [x] 8. Provider adapters
-- [ ] 9. Browser renderer
+- [x] 9. Browser renderer
 - [ ] 10. Quality control, CI and deployment
 
 Development rules are in [`CLAUDE.md`](CLAUDE.md).

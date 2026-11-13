@@ -14,7 +14,7 @@ export function registerMediaRoutes(router: Router<Ctx>): void {
   router.on(
     "GET",
     `${API_PREFIX}/projects/:id/assets/:assetId/content`,
-    async ({ env, db, user }, p) => {
+    async ({ url, env, db, user }, p) => {
       await requireProject(db, user.id, p.id ?? "");
       const asset = await getAsset(db, user.id, p.assetId ?? "");
       if (!asset || asset.project_id !== p.id)
@@ -30,7 +30,7 @@ export function registerMediaRoutes(router: Router<Ctx>): void {
           "content-length": String(object.size),
           "cache-control": "private, max-age=3600",
           "x-content-type-options": "nosniff",
-          "content-disposition": `inline; filename="${asset.storage_key.split("/").pop() ?? "asset"}"`,
+          "content-disposition": `${url.searchParams.get("download") === "1" ? "attachment" : "inline"}; filename="${asset.storage_key.split("/").pop() ?? "asset"}"`,
         },
       });
     },

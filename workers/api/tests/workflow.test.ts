@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { setTextModelOverride } from "../src/ai/factory";
 import { ModelError, type TextModel } from "../src/ai/text-model";
 import {
+  createAsset,
   getLatestWorkflowRun,
   listJobs,
   listScenes,
@@ -85,11 +86,21 @@ describe("production workflow", () => {
     const { data } = (await res.json()) as { data: { workflow_run_id: string; status: string } };
     expect(data.status).toBe("planning");
     const renderId = await renderRequestIdFor(data.workflow_run_id);
+    // The finish step checks that the event points at a real render of this project. Create it
+    // once the media stage has run (that stage clears media left over from earlier runs).
+    const [running] = await introspector.get();
+    await running!.waitForStepResult({ name: "request-render" });
+    const owner = await upsertUserByEmail(env.DB, EMAIL);
+    const video = await createAsset(env.DB, owner.id, projectId, {
+      asset_type: "render",
+      storage_key: `projects/${projectId}/final-test.mp4`,
+      mime_type: "video/mp4",
+    });
     const [instance] = await introspector.get();
     await instance!.modify(async (m) => {
       await m.mockEvent({
         type: RENDER_EVENT,
-        payload: { render_request_id: renderId, asset_id: "a1" },
+        payload: { render_request_id: renderId, asset_id: video.id },
       });
     });
     await instance!.waitForStatus("complete");

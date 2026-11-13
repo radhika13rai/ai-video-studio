@@ -3,6 +3,7 @@ import type { ProjectStatus } from "@avs/types";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { ErrorBox } from "../components/Feedback";
 import { PipelineSteps, pipelineSteps, SceneList } from "../components/Production";
+import { FinalVideo, RenderPanel } from "../components/RenderPanel";
 import { StatusBadge } from "../components/StatusBadge";
 import {
   isActive,
@@ -75,6 +76,7 @@ export function ProjectPage({ id }: { id: string }) {
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
+  const [rendering, setRendering] = useState(false);
 
   useEffect(() => {
     const ctrl = new AbortController();
@@ -136,6 +138,7 @@ export function ProjectPage({ id }: { id: string }) {
 
   const p = state.project;
   const style = typeof p.production_config.style === "string" ? p.production_config.style : null;
+  const finalVideo = progress.assets.find((a) => a.asset_type === "render") ?? null;
   const fallbacks = Array.isArray(p.production_config.fallbacks)
     ? p.production_config.fallbacks.filter((f): f is string => typeof f === "string")
     : [];
@@ -282,24 +285,38 @@ export function ProjectPage({ id }: { id: string }) {
               ))}
             </ul>
           )}
-          {p.status === "awaiting_render" && (
-            <p className="muted small">
-              The plan and storyboard are ready. Rendering in the browser arrives in the next
-              update.
-            </p>
+          {(p.status === "awaiting_render" || p.status === "rendering") && (
+            <RenderPanel
+              project={p}
+              onBusyChange={setRendering}
+              onFinished={() => {
+                getProject(p.id).then(
+                  (project) => setState({ kind: "ready", project }),
+                  () => undefined,
+                );
+                loadProgress();
+              }}
+            />
           )}
-          {STARTABLE.includes(p.status) && (
-            <button type="button" className="btn primary wide" onClick={generate} disabled={busy}>
+          {STARTABLE.includes(p.status) && !rendering && (
+            <button
+              type="button"
+              className={`btn wide${p.status === "awaiting_render" ? "" : " primary"}`}
+              onClick={generate}
+              disabled={busy}
+            >
               {p.status === "created" ? "Generate video" : "Generate again"}
             </button>
           )}
-          {CANCELLABLE.includes(p.status) && (
+          {CANCELLABLE.includes(p.status) && !rendering && (
             <button type="button" className="btn wide" onClick={cancel} disabled={busy}>
               Cancel production
             </button>
           )}
         </div>
       </div>
+
+      {finalVideo && <FinalVideo asset={finalVideo} aspect={p.aspect_ratio} />}
 
       <SceneList scenes={progress.scenes} assets={progress.assets} />
 
