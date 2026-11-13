@@ -121,7 +121,7 @@ rejects API calls until Cloudflare Access is configured.
 - [x] 4. API foundation (project CRUD, validation, errors, authentication)
 - [x] 5. Project dashboard
 - [x] 6. Director and creative agents
-- [ ] 7. Workflow orchestration
+- [x] 7. Workflow orchestration
 - [ ] 8. Provider adapters
 - [ ] 9. Browser renderer
 - [ ] 10. Quality control, CI and deployment

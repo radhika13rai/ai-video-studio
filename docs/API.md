@@ -44,7 +44,21 @@ Every endpoint except `/health` needs a signed-in user. See `SECURITY.md`.
 | GET    | `/projects/:id/assets`  | –                                                        | Asset metadata                                              |
 | GET    | `/projects/:id/quality` | –                                                        | Latest quality report or `null`                             |
 
+| POST | `/projects/:id/generate` | optional `Idempotency-Key` | 202 `{ project_id, workflow_run_id, status: "planning" }` |
+| POST | `/projects/:id/cancel` | – | The cancelled project |
+| GET | `/projects/:id/run` | – | Latest workflow run or `null` |
+
 `status` can't be changed through `PATCH`; the production workflow owns it.
+
+### Production
+
+`generate` works from `created`, `failed`, `cancelled`, `awaiting_render` or `completed` (a run still
+waiting for its render is superseded). It claims the project atomically, so a second click gets
+409 `INVALID_STATE`. When no text model is available (local `pnpm dev`, or `AI_TEXT_PROVIDER=none`)
+it returns 503 `PROVIDER_UNAVAILABLE` and the project is unchanged. `cancel` works while the
+project is planning, generating, awaiting or in render or quality check; it marks the run
+cancelled, terminates the workflow instance and cancels open jobs. Progress is read from
+`/jobs`, `/scenes` and `/run`; the dashboard polls every 3 seconds while production is active.
 
 ### Create a project
 
@@ -70,5 +84,5 @@ Server errors aren't stored, so a 5xx can be retried with the same key.
 
 ## Planned
 
-Generate and cancel (Task 7), scene edits, asset upload and download, render (Task 9), providers
+Scene edits, asset upload and download, render (Task 9), providers
 and usage (Task 8).

@@ -200,3 +200,37 @@ export async function deleteProject(
   if (!del || del.meta.changes === 0) throw notFound("project");
   return { storage_keys: (keys?.results ?? []).map((r) => r.storage_key) };
 }
+
+/**
+ * Moves a project to `to` only if its status is one of `from`. Returns false when it wasn't
+ * (another request or the workflow got there first). This is how status races are avoided.
+ */
+export async function setProjectStatusIf(
+  db: D1Database,
+  userId: string,
+  projectId: string,
+  from: readonly ProjectStatus[],
+  to: ProjectStatus,
+): Promise<boolean> {
+  const res = await db
+    .prepare(
+      `UPDATE projects SET status = ?, updated_at = ?
+       WHERE id = ? AND user_id = ? AND status IN (${from.map(() => "?").join(", ")})`,
+    )
+    .bind(to, nowIso(), projectId, userId, ...from)
+    .run();
+  return res.meta.changes === 1;
+}
+
+/** Shallow-merges keys into production_config (plan, fallbacks, render request …). */
+export async function mergeProductionConfig(
+  db: D1Database,
+  userId: string,
+  projectId: string,
+  patch: JsonObject,
+): Promise<void> {
+  const current = await requireProject(db, userId, projectId);
+  await updateProject(db, userId, projectId, {
+    production_config: { ...current.production_config, ...patch },
+  });
+}

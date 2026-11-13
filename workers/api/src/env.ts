@@ -10,7 +10,15 @@ export interface Env {
   ACCESS_AUD?: string;
   MAX_VIDEO_DURATION?: string;
   MAX_PROJECT_SCENES?: string;
+  /** "workers-ai" (default) or "none" to disable text generation (local dev, tests). */
+  AI_TEXT_PROVIDER?: string;
+  /** Delay between retries of AI steps, e.g. "10 seconds" (default). Tests shorten it. */
+  WORKFLOW_RETRY_DELAY?: string;
+  /** Optional override of the Workers AI text model id. */
+  AI_TEXT_MODEL?: string;
   ASSETS?: Fetcher;
+  /** Workers AI. Remote-only: absent under `pnpm dev` (wrangler dev --local) and in tests. */
+  AI?: Ai;
   DB?: D1Database;
   MEDIA?: R2Bucket;
   PRODUCTION_WORKFLOW?: Workflow<ProductionParams>;

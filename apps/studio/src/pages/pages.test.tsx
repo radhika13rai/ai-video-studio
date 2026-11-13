@@ -14,6 +14,8 @@ const me = route("GET", API_PATHS.me, () =>
   }),
 );
 const goTo = (path: string) => history.replaceState(null, "", path);
+const progressRoutes = () =>
+  route("GET", /\/(scenes|jobs|run)$/, (url) => ok(url.pathname.endsWith("/run") ? null : []));
 
 describe("projects list", () => {
   it("shows an empty state that links to the form", async () => {
@@ -108,7 +110,7 @@ describe("new project form", () => {
       me,
       route("POST", API_PATHS.projects, () => ok(created, 201)),
       route("GET", API_PATHS.project(created.id), () => ok(created)),
-      route("GET", /\/(scenes|jobs)$/, () => ok([])),
+      progressRoutes(),
     );
     goTo("/projects/new");
     render(<App />);
@@ -160,7 +162,7 @@ describe("project page", () => {
     const calls = stubApi(
       me,
       route("GET", API_PATHS.project(p.id), () => ok(p)),
-      route("GET", /\/(scenes|jobs)$/, () => ok([])),
+      progressRoutes(),
       route("PATCH", API_PATHS.project(p.id), (_u, init) =>
         ok({ ...p, ...(JSON.parse(String(init.body)) as object) }),
       ),
@@ -174,8 +176,11 @@ describe("project page", () => {
     expect(await screen.findByRole("heading", { name: /Old name/ })).toBeTruthy();
     expect(screen.getByText("noir")).toBeTruthy();
     expect(screen.getByText("Draft")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Generate video" })).toHaveProperty("disabled", true);
-    expect(await screen.findByText("0 scenes · 0 jobs so far.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Generate video" })).toHaveProperty(
+      "disabled",
+      false,
+    );
+    expect(screen.getByRole("list", { name: "Production steps" })).toBeTruthy();
 
     await userEvent.click(screen.getByRole("button", { name: "Rename" }));
     const input = screen.getByLabelText("Project title");
@@ -201,7 +206,7 @@ describe("project page", () => {
     const calls = stubApi(
       me,
       route("GET", API_PATHS.project(p.id), () => ok(p)),
-      route("GET", /\/(scenes|jobs)$/, () => ok([])),
+      progressRoutes(),
     );
     goTo(`/projects/${p.id}`);
     render(<App />);
@@ -216,7 +221,9 @@ describe("project page", () => {
   it("says when a project doesn't exist", async () => {
     stubApi(
       me,
-      route("GET", /\/(scenes|jobs)$/, () => err("PROJECT_NOT_FOUND", "Project not found.", 404)),
+      route("GET", /\/(scenes|jobs|run)$/, () =>
+        err("PROJECT_NOT_FOUND", "Project not found.", 404),
+      ),
     );
     goTo("/projects/missing-id");
     render(<App />);
@@ -230,7 +237,7 @@ describe("project page", () => {
     stubApi(
       me,
       route("GET", API_PATHS.project(p.id), () => ok({ ...p, status })),
-      route("GET", /\/(scenes|jobs)$/, () => ok([])),
+      progressRoutes(),
     );
     goTo(`/projects/${p.id}`);
     render(<App />);
@@ -249,5 +256,136 @@ describe("navigation", () => {
     render(<App />);
     expect(await screen.findByText("Page not found")).toBeTruthy();
     expect(await screen.findByText("dev")).toBeTruthy();
+  });
+});
+
+describe("production controls", () => {
+  const job = (agent: string, status: string) => ({
+    id: crypto.randomUUID(),
+    project_id: "p",
+    scene_id: null,
+    agent_name: agent,
+    job_type: "t",
+    status,
+    error_message: null,
+    retry_count: 0,
+    max_retries: 2,
+    started_at: null,
+    completed_at: null,
+    created_at: "2026-11-13T00:00:00Z",
+  });
+
+  it("starts production with an idempotency key and shows the steps live", async () => {
+    let p = makeProject();
+    let jobs: unknown[] = [];
+    const calls = stubApi(
+      me,
+      route("GET", API_PATHS.project(p.id), () => ok(p)),
+      route("POST", API_PATHS.projectGenerate(p.id), () => {
+        p = { ...p, status: "planning" };
+        jobs = [job("director", "completed"), job("scriptwriter", "running")];
+        return ok({ project_id: p.id, workflow_run_id: "r1", status: "planning" }, 202);
+      }),
+      route("GET", /\/jobs$/, () => ok(jobs)),
+      route("GET", /\/(scenes|run)$/, (url) => ok(url.pathname.endsWith("/run") ? null : [])),
+    );
+    goTo(`/projects/${p.id}`);
+    render(<App />);
+    await userEvent.click(await screen.findByRole("button", { name: "Generate video" }));
+    expect(await screen.findByText("Planning")).toBeTruthy();
+    const post = calls.find((c) => c.init.method === "POST");
+    expect((post?.init.headers as Record<string, string>)["Idempotency-Key"]).toMatch(
+      /^[0-9a-f-]{36}$/,
+    );
+    await waitFor(() => {
+      const steps = screen.getByRole("list", { name: "Production steps" }).querySelectorAll("li");
+      expect([...steps].map((li) => li.getAttribute("data-state")).slice(0, 3)).toEqual([
+        "done",
+        "active",
+        "pending",
+      ]);
+    });
+    expect(screen.getByRole("button", { name: "Cancel production" })).toBeTruthy();
+  });
+
+  it("shows why production failed and lets you try again", async () => {
+    const p = makeProject({ status: "failed" });
+    stubApi(
+      me,
+      route("GET", API_PATHS.project(p.id), () => ok(p)),
+      route("GET", /\/jobs$/, () =>
+        ok([
+          job("director", "completed"),
+          { ...job("scriptwriter", "failed"), error_message: "quota" },
+        ]),
+      ),
+      route("GET", /\/scenes$/, () => ok([])),
+      route("GET", /\/run$/, () =>
+        ok({
+          id: "r1",
+          project_id: p.id,
+          workflow_name: "production-workflow",
+          workflow_instance_id: "r1",
+          current_step: "scriptwriter",
+          status: "failed",
+          error_message: "Workers AI daily free allowance is used up.",
+          started_at: null,
+          completed_at: null,
+          created_at: "2026-11-13T00:00:00Z",
+        }),
+      ),
+    );
+    goTo(`/projects/${p.id}`);
+    render(<App />);
+    expect(await screen.findByText("Workers AI daily free allowance is used up.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Generate again" })).toBeTruthy();
+    const states = [
+      ...screen.getByRole("list", { name: "Production steps" }).querySelectorAll("li"),
+    ].map((li) => li.getAttribute("data-state"));
+    expect(states.slice(0, 2)).toEqual(["done", "failed"]);
+  });
+
+  it("shows the storyboard, fallback notes and a cancel button while waiting to render", async () => {
+    const p = makeProject({
+      status: "awaiting_render",
+      production_config: {
+        fallbacks: [
+          "No image provider is configured yet; scenes will render as styled text cards.",
+        ],
+      },
+    });
+    const scene = (n: number) => ({
+      id: `s${n}`,
+      project_id: p.id,
+      scene_number: n,
+      description: "d",
+      visual_prompt: `Jellyfish ${n}`,
+      voiceover: `Line ${n}.`,
+      duration_seconds: 5,
+      visual_type: "image",
+      status: "pending",
+      created_at: "2026-11-13T00:00:00Z",
+    });
+    const calls = stubApi(
+      me,
+      route("GET", API_PATHS.project(p.id), () => ok(p)),
+      route("GET", /\/scenes$/, () => ok([scene(1), scene(2)])),
+      route("GET", /\/(jobs|run)$/, (url) => ok(url.pathname.endsWith("/run") ? null : [])),
+      route("POST", API_PATHS.projectCancel(p.id), () => ok({ ...p, status: "cancelled" })),
+    );
+    goTo(`/projects/${p.id}`);
+    render(<App />);
+    expect(await screen.findByText("“Line 2.”")).toBeTruthy();
+    expect(screen.getByText(/2 scenes · 10s/)).toBeTruthy();
+    expect(screen.getByText(/styled text cards/)).toBeTruthy();
+    vi.stubGlobal(
+      "confirm",
+      vi.fn(() => true),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Cancel production" }));
+    expect(await screen.findByText("Cancelled")).toBeTruthy();
+    expect(calls.some((c) => c.init.method === "POST" && c.url.pathname.endsWith("/cancel"))).toBe(
+      true,
+    );
   });
 });

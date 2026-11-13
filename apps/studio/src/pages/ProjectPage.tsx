@@ -1,6 +1,8 @@
-import type { Project } from "@avs/contracts";
-import { useEffect, useState, type FormEvent } from "react";
+import type { Job, Project, Scene, WorkflowRun } from "@avs/contracts";
+import type { ProjectStatus } from "@avs/types";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { ErrorBox } from "../components/Feedback";
+import { PipelineSteps, pipelineSteps, SceneList } from "../components/Production";
 import { StatusBadge } from "../components/StatusBadge";
 import {
   isActive,
@@ -12,12 +14,36 @@ import {
 import { Link, navigate } from "../lib/router";
 import {
   ApiClientError,
-  countJobs,
-  countScenes,
+  cancelProject,
   deleteProject,
+  generateProject,
   getProject,
+  getRun,
+  listJobs,
+  listScenes,
   updateProject,
 } from "../services/api";
+
+const STARTABLE: ProjectStatus[] = [
+  "created",
+  "failed",
+  "cancelled",
+  "awaiting_render",
+  "completed",
+];
+const CANCELLABLE: ProjectStatus[] = [
+  "planning",
+  "generating",
+  "awaiting_render",
+  "rendering",
+  "quality_check",
+];
+
+interface Progress {
+  jobs: Job[];
+  scenes: Scene[];
+  run: WorkflowRun | null;
+}
 
 type State =
   | { kind: "loading" }
@@ -27,7 +53,16 @@ type State =
 
 export function ProjectPage({ id }: { id: string }) {
   const [state, setState] = useState<State>({ kind: "loading" });
-  const [counts, setCounts] = useState<{ scenes: number; jobs: number } | null>(null);
+  const [progress, setProgress] = useState<Progress>({ jobs: [], scenes: [], run: null });
+  // One key per page visit: a double click can't start two runs.
+  const generateKey = useRef(crypto.randomUUID());
+
+  const loadProgress = useCallback(() => {
+    Promise.all([listJobs(id), listScenes(id), getRun(id)]).then(
+      ([jobs, scenes, run]) => setProgress({ jobs, scenes, run }),
+      () => undefined,
+    );
+  }, [id]);
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState("");
   const [busy, setBusy] = useState(false);
@@ -49,14 +84,11 @@ export function ProjectPage({ id }: { id: string }) {
             });
         },
       );
-      Promise.all([countScenes(id), countJobs(id)]).then(
-        ([scenes, jobs]) => setCounts({ scenes, jobs }),
-        () => undefined,
-      );
+      loadProgress();
     };
     load(false);
     return () => ctrl.abort();
-  }, [id, reload]);
+  }, [id, reload, loadProgress]);
 
   // Poll while the project is in production so the status badge stays current.
   const active = state.kind === "ready" && isActive(state.project.status);
@@ -67,9 +99,10 @@ export function ProjectPage({ id }: { id: string }) {
         (project) => setState({ kind: "ready", project }),
         () => undefined,
       );
-    }, 5000);
+      loadProgress();
+    }, 3000);
     return () => clearInterval(t);
-  }, [active, id]);
+  }, [active, id, loadProgress]);
 
   if (state.kind === "loading")
     return <div className="card skeleton tall" aria-busy="true" aria-label="Loading" />;
@@ -96,6 +129,9 @@ export function ProjectPage({ id }: { id: string }) {
 
   const p = state.project;
   const style = typeof p.production_config.style === "string" ? p.production_config.style : null;
+  const fallbacks = Array.isArray(p.production_config.fallbacks)
+    ? p.production_config.fallbacks.filter((f): f is string => typeof f === "string")
+    : [];
 
   async function saveTitle(e: FormEvent) {
     e.preventDefault();
@@ -108,6 +144,36 @@ export function ProjectPage({ id }: { id: string }) {
       setEditing(false);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Could not rename.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function generate() {
+    setBusy(true);
+    setActionError(null);
+    try {
+      await generateProject(p.id, generateKey.current);
+      generateKey.current = crypto.randomUUID();
+      const project = await getProject(p.id);
+      setState({ kind: "ready", project });
+      loadProgress();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Could not start production.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function cancel() {
+    if (!window.confirm("Stop production? Finished steps are kept.")) return;
+    setBusy(true);
+    setActionError(null);
+    try {
+      setState({ kind: "ready", project: await cancelProject(p.id) });
+      loadProgress();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Could not cancel.");
     } finally {
       setBusy(false);
     }
@@ -198,36 +264,37 @@ export function ProjectPage({ id }: { id: string }) {
 
         <div className="card">
           <h2>Production</h2>
-          <ol className="steps">
-            {(
-              [
-                "Script & storyboard",
-                "Images, video & voice",
-                "Render in your browser",
-                "Quality check",
-              ] as const
-            ).map((s, i) => (
-              <li key={s} className="step">
-                <span className="step-num">{i + 1}</span> {s}
-              </li>
-            ))}
-          </ol>
-          <p className="muted small">
-            {counts ? `${counts.scenes} scenes · ${counts.jobs} jobs so far.` : "Loading progress…"}
-          </p>
-          <button
-            type="button"
-            className="btn primary wide"
-            disabled
-            title="Arrives with workflow orchestration (Task 7)"
-          >
-            Generate video
-          </button>
-          <p className="muted small">
-            Automatic production is being built and isn't available yet.
-          </p>
+          <PipelineSteps steps={pipelineSteps(p, progress.jobs, progress.run)} />
+          {p.status === "failed" && progress.run?.error_message && (
+            <p className="alert error small-alert">{progress.run.error_message}</p>
+          )}
+          {fallbacks.length > 0 && (
+            <ul className="notes">
+              {fallbacks.map((f) => (
+                <li key={f}>{f}</li>
+              ))}
+            </ul>
+          )}
+          {p.status === "awaiting_render" && (
+            <p className="muted small">
+              The plan and storyboard are ready. Rendering in the browser arrives in the next
+              update.
+            </p>
+          )}
+          {STARTABLE.includes(p.status) && (
+            <button type="button" className="btn primary wide" onClick={generate} disabled={busy}>
+              {p.status === "created" ? "Generate video" : "Generate again"}
+            </button>
+          )}
+          {CANCELLABLE.includes(p.status) && (
+            <button type="button" className="btn wide" onClick={cancel} disabled={busy}>
+              Cancel production
+            </button>
+          )}
         </div>
       </div>
+
+      <SceneList scenes={progress.scenes} />
 
       <div className="danger-zone">
         <button type="button" className="btn danger" onClick={remove} disabled={busy}>

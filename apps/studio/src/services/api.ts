@@ -1,6 +1,10 @@
 import type {
   CreateProjectRequest,
+  GenerateResponse,
   HealthData,
+  Job,
+  Scene,
+  WorkflowRun,
   Project,
   ProjectPage,
   UpdateProjectRequest,
@@ -10,7 +14,11 @@ import { API_PATHS, IDEMPOTENCY_HEADER } from "@avs/contracts";
 import type { ProjectStatus } from "@avs/types";
 import {
   errorEnvelopeSchema,
+  generateResponseSchema,
   healthDataSchema,
+  jobSchema,
+  sceneSchema,
+  workflowRunSchema,
   projectPageSchema,
   projectSchema,
   userSchema,
@@ -112,6 +120,17 @@ const deletedSchema = z.object({ id: z.string(), deleted: z.literal(true) });
 export const deleteProject = (id: string) =>
   request(API_PATHS.project(id), deletedSchema, { method: "DELETE" });
 
-const countSchema = z.array(z.unknown()).transform((a) => a.length);
-export const countScenes = (id: string) => request(API_PATHS.projectScenes(id), countSchema);
-export const countJobs = (id: string) => request(API_PATHS.projectJobs(id), countSchema);
+export const listScenes = (id: string): Promise<Scene[]> =>
+  request(API_PATHS.projectScenes(id), z.array(sceneSchema));
+export const listJobs = (id: string): Promise<Job[]> =>
+  request(API_PATHS.projectJobs(id), z.array(jobSchema));
+export const getRun = (id: string): Promise<WorkflowRun | null> =>
+  request(API_PATHS.projectRun(id), workflowRunSchema.nullable());
+
+export const generateProject = (id: string, idempotencyKey: string): Promise<GenerateResponse> =>
+  request(API_PATHS.projectGenerate(id), generateResponseSchema, {
+    method: "POST",
+    headers: { [IDEMPOTENCY_HEADER]: idempotencyKey },
+  });
+export const cancelProject = (id: string): Promise<Project> =>
+  request(API_PATHS.projectCancel(id), projectSchema, { method: "POST" });

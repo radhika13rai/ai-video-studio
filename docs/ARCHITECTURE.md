@@ -15,7 +15,7 @@ Browser (apps/studio)  ──/api/v1──▶  Worker (workers/api)  ──▶  
 - `packages/contracts`, `packages/schemas` and `packages/types` define how the parts communicate.
   Both sides import the same TypeScript source.
 
-## What exists today (Tasks 1–6)
+## What exists today (Tasks 1–7)
 
 - `GET /api/v1/health`, plus JSON 404 and 405 responses in the shared error envelope.
 - An app shell that calls the health endpoint and validates the response with Zod.
@@ -39,7 +39,10 @@ Browser (apps/studio)  ──/api/v1──▶  Worker (workers/api)  ──▶  
 
 - Agents in `workers/api/src/agents`: a deterministic director and model-backed scriptwriter and
   storyboard with validated JSON output, behind the `TextModel` interface (Workers AI adapter in
-  `src/ai`). See `AGENTS.md` and `PROVIDERS.md`. They aren't wired to an endpoint yet.
+  `src/ai`). See `AGENTS.md` and `PROVIDERS.md`. - `ProductionWorkflow` (Cloudflare Workflows) runs director → scriptwriter → storyboard as tracked
+  jobs, records the media fallback, requests a render and waits up to 7 days for it, then
+  completes. `POST /projects/:id/generate` and `/cancel` drive it; the project page shows live
+  steps, errors and the storyboard. See `AGENTS.md`.
 
-Workflow orchestration, media providers and the renderer are not implemented yet. The "Generate
-video" button is visibly disabled until Task 7.
+Media providers (Task 8), the browser renderer and its completion endpoint (Task 9) and automated
+quality checks (Task 10) are not implemented yet.

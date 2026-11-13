@@ -652,3 +652,101 @@ h3 {
     display: none;
   }
 }
+
+/* Production pipeline */
+.step {
+  align-items: flex-start;
+}
+.step-label {
+  display: block;
+  color: var(--text);
+  font-weight: 500;
+}
+.step-detail {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+.state-pending .step-label {
+  color: var(--muted);
+  font-weight: 400;
+}
+.state-done .step-num {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+.state-active .step-num {
+  background: var(--active-soft);
+  color: var(--active);
+  box-shadow: 0 0 0 3px var(--active-soft);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+.state-failed .step-num {
+  background: var(--bad-soft);
+  color: var(--bad);
+}
+.state-skipped .step-num {
+  color: var(--muted);
+}
+.small-alert {
+  font-size: 13px;
+  margin: 8px 0 0;
+}
+.notes {
+  margin: 12px 0 0;
+  padding: 10px 12px 10px 28px;
+  background: var(--warn-soft);
+  color: #78350f;
+  border-radius: 10px;
+  font-size: 13px;
+}
+.btn.wide + .btn.wide {
+  margin-top: 8px;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* Storyboard */
+.detail-grid + .card {
+  margin-top: 16px;
+}
+.small-inline {
+  font-size: 13px;
+  font-weight: 400;
+}
+.scenes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+.scene {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+.scene-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 14px;
+}
+.voiceover {
+  margin: 6px 0 4px;
+}
+.visual {
+  margin: 0;
+  font-size: 13px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .state-active .step-num {
+    animation: none;
+  }
+}

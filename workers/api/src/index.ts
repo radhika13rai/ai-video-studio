@@ -5,12 +5,14 @@ import type { Env } from "./env";
 import { ApiError, toErrorResponse } from "./lib/errors";
 import { Router } from "./lib/router";
 import { handleHealth } from "./routes/health";
+import { registerProductionRoutes } from "./routes/production";
 import { registerProjectRoutes, type Ctx } from "./routes/projects";
 
 export { ProductionWorkflow } from "./workflows/production-workflow";
 
 const router = new Router<Ctx>();
 registerProjectRoutes(router);
+registerProductionRoutes(router);
 
 async function handleApi(request: Request, env: Env, url: URL, getKeys?: KeyFetcher) {
   // Health is public so uptime checks work without signing in.

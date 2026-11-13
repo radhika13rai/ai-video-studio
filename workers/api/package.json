@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev --local --var APP_ENV:development",
+    "dev": "wrangler dev --local --var APP_ENV:development --var AI_TEXT_PROVIDER:none",
     "deploy": "bash ../../scripts/validate-env.sh && wrangler deploy",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

@@ -11,6 +11,9 @@ export const API_PATHS = {
   projectJobs: (id: string) => `${API_PREFIX}/projects/${encodeURIComponent(id)}/jobs`,
   projectAssets: (id: string) => `${API_PREFIX}/projects/${encodeURIComponent(id)}/assets`,
   projectQuality: (id: string) => `${API_PREFIX}/projects/${encodeURIComponent(id)}/quality`,
+  projectGenerate: (id: string) => `${API_PREFIX}/projects/${encodeURIComponent(id)}/generate`,
+  projectCancel: (id: string) => `${API_PREFIX}/projects/${encodeURIComponent(id)}/cancel`,
+  projectRun: (id: string) => `${API_PREFIX}/projects/${encodeURIComponent(id)}/run`,
 } as const;
 
 /** Header that makes a POST safe to retry: the same key replays the first response. */
@@ -67,9 +70,13 @@ export function fail(code: ErrorCode, message: string, retryable = false): ApiFa
 export type {
   BindingCheck,
   CreateProjectRequest,
+  GenerateResponse,
   HealthData,
+  Job,
   Project,
   ProjectPage,
+  Scene,
   UpdateProjectRequest,
   User,
+  WorkflowRun,
 } from "@avs/schemas";

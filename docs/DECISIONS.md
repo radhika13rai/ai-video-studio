@@ -115,3 +115,21 @@ retries burn the free Neuron allowance. The workflow (Task 7) decides whether to
 
 `pnpm dev` uses `wrangler dev --local` and tests set `remoteBindings: false`. **Why:** development
 and CI must work with no Cloudflare account; real AI is opt-in with `dev:ai`.
+
+## 021. No new project status; the pipeline uses the existing ones (2026-11-13)
+
+A "storyboard ready" status was considered. Adding it means rebuilding `projects` to change its
+CHECK constraint, and D1 can't switch off foreign keys: dropping the old table would cascade-delete
+every project's scenes, jobs and assets. Instead, the workflow follows the blueprint: planning →
+generating (with a recorded fallback until Task 8) → awaiting_render. **Why:** no risky migration,
+and the statuses mean what they say.
+
+## 022. Jobs keyed by run and agent (2026-11-13)
+
+Job IDs are derived from `runId:agent` (a hashed UUID), and so is the render request ID. **Why:**
+Workflows retry steps; stable IDs make each step idempotent without extra lookup tables.
+
+## 023. Cancellation is database-first (2026-11-13)
+
+Cancel marks the run `cancelled`, then terminates the instance; every step checks the run before
+working. **Why:** terminate can lag or fail; the database is the source of truth the UI reads.
