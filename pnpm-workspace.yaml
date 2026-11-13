@@ -2,6 +2,7 @@ packages:
   - apps/*
   - workers/*
   - packages/*
+  - renderer
 onlyBuiltDependencies:
   - esbuild
   - workerd

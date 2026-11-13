@@ -12,7 +12,9 @@
     "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
     "cf:create": "wrangler d1 create ai-video-studio && wrangler r2 bucket create ai-video-studio-media",
     "types": "wrangler types --check",
-    "dev:ai": "wrangler dev --var APP_ENV:development"
+    "dev:ai": "wrangler dev --var APP_ENV:development",
+    "vendor:upload": "bash ../../scripts/upload-ffmpeg-core.sh --remote",
+    "vendor:upload:local": "bash ../../scripts/upload-ffmpeg-core.sh --local"
   },
   "dependencies": {
     "@avs/contracts": "workspace:*",

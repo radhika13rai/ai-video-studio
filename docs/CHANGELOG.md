@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.9.0 (2026-11-13)
+
+- Task 9: browser renderer (`@avs/renderer`): Canvas frames with Ken Burns motion, balanced burned-in
+  captions, text cards and fades; Web Audio narration mix; WebCodecs H.264 with an FFmpeg.wasm
+  fallback; FFmpeg.wasm AAC and MP4 assembly; render, upload, complete and abort endpoints with
+  identity checks; FFmpeg core served from R2; render panel with progress, stop and one render per
+  browser; final video player and download. Verified in a real browser with real AI media.
+  21 new tests.
+
 ## 0.8.0 (2026-11-13)
 
 - Task 8: media provider layer: FLUX and SDXL image and MeloTTS voice adapters on Workers AI with

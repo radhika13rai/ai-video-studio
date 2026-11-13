@@ -2,6 +2,7 @@ import type {
   Asset,
   CreateProjectRequest,
   ProviderStatus,
+  RenderManifest,
   GenerateResponse,
   HealthData,
   Job,
@@ -18,6 +19,7 @@ import {
   assetSchema,
   errorEnvelopeSchema,
   providerStatusSchema,
+  renderManifestSchema,
   generateResponseSchema,
   healthDataSchema,
   jobSchema,
@@ -134,6 +136,53 @@ export const listProviders = (): Promise<ProviderStatus[]> =>
   request(API_PATHS.providers, z.array(providerStatusSchema));
 export const assetUrl = (projectId: string, assetId: string) =>
   `${BASE_URL}${API_PATHS.assetContent(projectId, assetId)}`;
+export const startRender = (id: string): Promise<RenderManifest> =>
+  request(API_PATHS.projectRender(id), renderManifestSchema, { method: "POST" });
+export const completeRender = (id: string, renderRequestId: string, assetId: string) =>
+  request(API_PATHS.projectRenderComplete(id), z.object({ status: z.string() }), {
+    method: "POST",
+    body: { render_request_id: renderRequestId, asset_id: assetId },
+  });
+export const abortRender = (id: string) =>
+  request(API_PATHS.projectRenderAbort(id), projectSchema, { method: "POST" });
+
+/** Uploads the finished MP4 as the raw request body (no multipart, no base64). */
+export async function uploadRender(
+  id: string,
+  renderRequestId: string,
+  mp4: Uint8Array,
+  info: { durationSeconds: number; encoder: string },
+): Promise<Asset> {
+  const res = await fetch(`${BASE_URL}${API_PATHS.projectRenderUpload(id, renderRequestId)}`, {
+    method: "POST",
+    headers: {
+      "content-type": "video/mp4",
+      "x-video-duration": String(info.durationSeconds),
+      "x-video-encoder": info.encoder,
+    },
+    body: new Blob([mp4 as BlobPart], { type: "video/mp4" }),
+  }).catch(() => {
+    throw new ApiClientError("NETWORK_ERROR", "Upload failed: could not reach the API.", true);
+  });
+  const body: unknown = await res.json().catch(() => null);
+  const ok = z.object({ success: z.literal(true), data: assetSchema }).safeParse(body);
+  if (ok.success && res.ok) return ok.data.data;
+  const failure = errorEnvelopeSchema.safeParse(body);
+  if (failure.success)
+    throw new ApiClientError(
+      failure.data.error.code,
+      failure.data.error.message,
+      failure.data.error.retryable,
+      res.status,
+    );
+  throw new ApiClientError(
+    "INVALID_RESPONSE",
+    `Upload failed (HTTP ${res.status}).`,
+    false,
+    res.status,
+  );
+}
+
 export const getRun = (id: string): Promise<WorkflowRun | null> =>
   request(API_PATHS.projectRun(id), workflowRunSchema.nullable());
 

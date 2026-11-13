@@ -196,3 +196,36 @@ export const providerStatusSchema = z.object({
   note: z.string().nullable(),
 });
 export type ProviderStatus = z.infer<typeof providerStatusSchema>;
+
+/** POST /api/v1/projects/:id/render: everything the browser needs to render the video. */
+export const renderManifestSchema = z.object({
+  render_request_id: z.string(),
+  project: z.object({
+    id: z.string(),
+    title: z.string(),
+    aspect_ratio: z.enum(ASPECT_RATIOS),
+    duration_seconds: z.number().positive(),
+  }),
+  scenes: z
+    .array(
+      z.object({
+        scene_number: z.number().int().positive(),
+        start_seconds: z.number().nonnegative(),
+        duration_seconds: z.number().positive(),
+        visual_type: z.enum(SCENE_VISUAL_TYPES),
+        caption: z.string(),
+        image_url: z.string().nullable(),
+        voice_url: z.string().nullable(),
+      }),
+    )
+    .min(1)
+    .max(LIMITS.maxProjectScenes),
+  fallbacks: z.array(z.string()),
+});
+export type RenderManifest = z.infer<typeof renderManifestSchema>;
+
+/** POST /api/v1/projects/:id/render/complete */
+export const renderCompleteRequestSchema = z.object({
+  render_request_id: z.string().min(1),
+  asset_id: z.string().min(1),
+});

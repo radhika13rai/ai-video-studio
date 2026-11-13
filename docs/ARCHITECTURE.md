@@ -15,7 +15,7 @@ Browser (apps/studio)  ──/api/v1──▶  Worker (workers/api)  ──▶  
 - `packages/contracts`, `packages/schemas` and `packages/types` define how the parts communicate.
   Both sides import the same TypeScript source.
 
-## What exists today (Tasks 1–8)
+## What exists today (Tasks 1–9)
 
 - `GET /api/v1/health`, plus JSON 404 and 405 responses in the shared error envelope.
 - An app shell that calls the health endpoint and validates the response with Zod.
@@ -48,5 +48,7 @@ Browser (apps/studio)  ──/api/v1──▶  Worker (workers/api)  ──▶  
   a registry with priorities, daily caps, health and fallback. Each scene's media is stored in R2
   and served to its owner. See `PROVIDERS.md`.
 
-The browser renderer and its completion endpoint (Task 9) and automated quality checks (Task 10)
-are not implemented yet.
+- Browser renderer (`renderer/`): Canvas frames, Web Audio narration, WebCodecs/FFmpeg.wasm encoding
+  to H.264/AAC MP4, upload to R2 and a workflow event to finish. See `RENDERER.md`.
+
+Automated quality checks and deployment (Task 10) are not implemented yet.

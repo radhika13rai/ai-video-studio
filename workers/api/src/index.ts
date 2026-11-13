@@ -7,6 +7,7 @@ import { Router } from "./lib/router";
 import { handleHealth } from "./routes/health";
 import { registerMediaRoutes } from "./routes/media";
 import { registerProductionRoutes } from "./routes/production";
+import { registerRenderRoutes, serveVendor } from "./routes/render";
 import { registerProjectRoutes, type Ctx } from "./routes/projects";
 
 export { ProductionWorkflow } from "./workflows/production-workflow";
@@ -15,6 +16,7 @@ const router = new Router<Ctx>();
 registerProjectRoutes(router);
 registerProductionRoutes(router);
 registerMediaRoutes(router);
+registerRenderRoutes(router);
 
 async function handleApi(request: Request, env: Env, url: URL, getKeys?: KeyFetcher) {
   // Health is public so uptime checks work without signing in.
@@ -42,6 +44,8 @@ export function createWorker(deps: { getKeys?: KeyFetcher } = {}) {
             throw new ApiError(404, "NOT_FOUND", `Unknown API version. Use ${API_PREFIX}.`);
           return await handleApi(request, env, url, deps.getKeys);
         }
+        const vendor = await serveVendor(env, url.pathname);
+        if (vendor) return vendor;
         // Everything else is the built frontend (served by the ASSETS binding when deployed).
         if (env.ASSETS) return await env.ASSETS.fetch(request);
         return new Response("Not found", { status: 404 });

@@ -6,6 +6,7 @@ import { briefSchema, runDirector, runScriptwriter, runStoryboard, type Brief } 
 import { textModelFor } from "../ai/factory";
 import {
   cancelOpenJobs,
+  getAsset,
   getWorkflowRun,
   mergeProductionConfig,
   replaceScenes,
@@ -196,6 +197,9 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, ProductionParams
         const evt = renderEventSchema.safeParse(rendered.payload);
         if (!evt.success || evt.data.render_request_id !== renderRequestId)
           throw new NonRetryableError("Render event doesn't match this run's render request.");
+        const video = await getAsset(db, userId, evt.data.asset_id);
+        if (!video || video.project_id !== projectId || video.asset_type !== "render")
+          throw new NonRetryableError("The rendered video is missing.");
         await updateWorkflowRun(db, userId, runId, {
           status: "running",
           current_step: "quality-check",

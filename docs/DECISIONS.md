@@ -151,3 +151,22 @@ better than none, and the blueprint asks for recorded, never silent, fallbacks.
 The script schema sent to the model includes the segment count and a minimum length per segment
 in characters. The prompt asks for two sentences per segment. **Why:** live runs showed Llama
 writes about half the requested words when it is only given a word count.
+
+## 027. WebCodecs for video, FFmpeg.wasm for AAC and the MP4 (2026-11-13)
+
+Chromium's WebCodecs encodes H.264 in hardware but can't encode AAC. FFmpeg.wasm always produces
+the final file (AAC audio, MP4 container); it also encodes the video with libx264 when WebCodecs
+isn't available. **Why:** fast where possible (5 s vs 29 s for 15 s of 720p), works everywhere, and
+keeps the blueprint's H.264/AAC output.
+
+## 028. FFmpeg core served from R2, not a CDN or static assets (2026-11-13)
+
+The 32 MB core is over the 25 MiB static-asset limit. The Worker serves it from R2 at a versioned,
+immutable same-origin path. **Why:** no third-party runtime dependency, no CORS or isolation
+headers, and it stays inside the free tier.
+
+## 029. Single-threaded FFmpeg core (2026-11-13)
+
+The multi-threaded core needs `SharedArrayBuffer`, which needs COOP/COEP headers on every page and
+breaks embedding cross-origin media. **Why:** with WebCodecs doing the heavy video work, FFmpeg
+only muxes and encodes AAC, so threads add complexity for little gain.
