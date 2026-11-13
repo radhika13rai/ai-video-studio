@@ -12,7 +12,14 @@ export default defineConfig({
       wrangler: { configPath: "./wrangler.jsonc" },
       // Workers AI is remote-only; tests never call it (agents get a scripted fake model).
       remoteBindings: false,
-      miniflare: { bindings: { TEST_MIGRATIONS: migrations, APP_ENV: "test" } },
+      miniflare: {
+        bindings: {
+          TEST_MIGRATIONS: migrations,
+          APP_ENV: "test",
+          AI_TEXT_PROVIDER: "none",
+          WORKFLOW_RETRY_DELAY: "1 second",
+        },
+      },
     }),
   ],
   test: { setupFiles: ["./tests/apply-migrations.ts"] },

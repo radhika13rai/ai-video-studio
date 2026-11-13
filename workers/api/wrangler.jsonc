@@ -53,6 +53,7 @@
     "APP_ENV": "production",
     "ACCESS_TEAM_DOMAIN": "",
     "ACCESS_AUD": "",
+    "AI_TEXT_PROVIDER": "workers-ai",
     "MAX_VIDEO_DURATION": "60",
     "MAX_PROJECT_SCENES": "20",
   },

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.0 (2026-11-13)
+
+- Task 7: durable production workflow (director, scriptwriter and storyboard as tracked jobs with
+  matching retry policies; media fallback recorded; render request with a 7-day wait; failure and
+  cancel handling; token usage tracking); `POST /generate`, `POST /cancel`, `GET /run`; project
+  page with live pipeline steps, error messages, fallback notes and the storyboard;
+  `AI_TEXT_PROVIDER` switch. 11 new tests.
+
 ## 0.6.0 (2026-11-13)
 
 - Task 6: director (deterministic classifier and pipeline planner), scriptwriter and storyboard

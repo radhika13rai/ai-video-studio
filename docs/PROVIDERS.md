@@ -18,6 +18,12 @@ allocation used up) maps to a non-retryable `quota` error.
 Workers AI free tier: 10,000 Neurons per day at the time of writing; requests fail after that on
 the Free plan, and some models need paid billing. Check Cloudflare's current pricing.
 
+### Switching text generation on and off
+
+`AI_TEXT_PROVIDER` is `workers-ai` in `wrangler.jsonc` and `none` under `pnpm dev` and in tests. The
+binding object exists locally but can't run, so this explicit switch decides whether
+`POST /generate` is allowed.
+
 ### Local development
 
 Workers AI always runs on Cloudflare. `pnpm dev` uses `wrangler dev --local`, so it starts without

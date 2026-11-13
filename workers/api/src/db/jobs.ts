@@ -38,6 +38,8 @@ function toJob(r: JobRow): Job {
 }
 
 const createJobSchema = z.object({
+  /** Optional caller-chosen UUID, so a retried workflow step finds the same job. */
+  id: z.uuid().optional(),
   agent_name: z.string().trim().min(1).max(100),
   job_type: z.string().trim().min(1).max(100),
   scene_id: z.string().nullish(),
@@ -60,7 +62,7 @@ export async function createJob(
   const parsed = createJobSchema.safeParse(input);
   if (!parsed.success) throw invalidData(parsed.error.issues[0]?.message ?? "invalid job");
   const j = parsed.data;
-  const id = newId();
+  const id = j.id ?? newId();
   // The scene, if given, must belong to the same project.
   const res = await db
     .prepare(
@@ -168,18 +170,37 @@ export async function failJob(
   userId: string,
   jobId: string,
   errorMessage: string,
+  opts: { final?: boolean } = {},
 ): Promise<Job & { will_retry: boolean }> {
   const now = nowIso();
+  // `final` skips the retry policy for errors a retry can't fix (bad input, quota used up).
+  const retry = opts.final ? "0" : "retry_count < max_retries";
   const job = await transition(
     db,
     userId,
     jobId,
     ["running"],
     `error_message = ?,
-     status = CASE WHEN retry_count < max_retries THEN 'queued' ELSE 'failed' END,
-     completed_at = CASE WHEN retry_count < max_retries THEN NULL ELSE ? END,
-     retry_count = CASE WHEN retry_count < max_retries THEN retry_count + 1 ELSE retry_count END`,
+     status = CASE WHEN ${retry} THEN 'queued' ELSE 'failed' END,
+     completed_at = CASE WHEN ${retry} THEN NULL ELSE ? END,
+     retry_count = CASE WHEN ${retry} THEN retry_count + 1 ELSE retry_count END`,
     [errorMessage.slice(0, 2000), now],
   );
   return { ...job, will_retry: job.status === "queued" };
+}
+
+/** Cancels every queued or running job of a project (used when production is cancelled). */
+export async function cancelOpenJobs(
+  db: D1Database,
+  userId: string,
+  projectId: string,
+): Promise<number> {
+  const res = await db
+    .prepare(
+      `UPDATE jobs SET status = 'cancelled', completed_at = ?
+       WHERE project_id = ? AND status IN ('queued', 'running') AND ${OWNED("project_id")}`,
+    )
+    .bind(nowIso(), projectId, userId)
+    .run();
+  return res.meta.changes;
 }

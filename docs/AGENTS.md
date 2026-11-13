@@ -48,3 +48,31 @@ Scene numbers are reassigned 1…n. Durations are scaled to sum exactly to the p
 `tests/agents.test.ts` drives every agent with a scripted fake model: valid output, fenced JSON,
 retry with feedback, over-long scripts, schema violations, quota errors, scene-count retries,
 normalization, and saving a storyboard through the real repository into local D1.
+
+## Production workflow (`src/workflows/production-workflow.ts`)
+
+| Step              | Project status            | What happens                                             |
+| ----------------- | ------------------------- | -------------------------------------------------------- |
+| `load-project`    | planning                  | Reads the brief (ownership enforced through `userId`)    |
+| `director`        | planning                  | Plan saved to `production_config.plan`                   |
+| `scriptwriter`    | planning                  | Script saved as the job's output                         |
+| `storyboard`      | planning                  | Scenes saved with `replaceScenes`                        |
+| `generate-assets` | generating                | Checks the provider registry; records fallbacks openly   |
+| `request-render`  | awaiting_render           | Saves a render request; the run status becomes `waiting` |
+| `wait-for-render` | awaiting_render           | Waits for the `render-complete` event (7-day timeout)    |
+| `finish`          | quality_check → completed | Checks the event matches the render request              |
+
+- **Jobs:** every agent runs through `runAgentJob`, which creates a job with a stable ID derived
+  from the run, so a retried step reuses it. A completed job replays its saved output. A running
+  job found on retry counts as a failed attempt.
+- **Retries:** AI steps retry twice with exponential backoff (10 s by default,
+  `WORKFLOW_RETRY_DELAY`), and the job's `max_retries` matches. Errors a retry can't fix (quota
+  used up, bad input) throw `NonRetryableError` and fail the job permanently.
+- **Failure:** a `record-failure` step cancels open jobs, sets the project to `failed` and saves a
+  readable error on the run. A missed render becomes "The video wasn't rendered within 7 days."
+- **Cancel:** the endpoint marks the run cancelled before terminating the instance. Every step
+  checks the run first, so nothing more is written after a cancel.
+- **Usage:** model tokens are recorded in `usage_events` for quota tracking.
+- **Media fallback:** until Task 8 registers providers, the run notes, for example, "No image
+  provider is configured yet; scenes will render as styled text cards", and the project page shows
+  it. The requested visuals are never swapped silently.

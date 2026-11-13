@@ -1,4 +1,14 @@
-import { ASPECT_RATIOS, LIMITS, PROJECT_STATUSES, TARGET_PLATFORMS, VIDEO_TYPES } from "@avs/types";
+import {
+  ASPECT_RATIOS,
+  JOB_STATUSES,
+  LIMITS,
+  PROJECT_STATUSES,
+  SCENE_STATUSES,
+  SCENE_VISUAL_TYPES,
+  TARGET_PLATFORMS,
+  VIDEO_TYPES,
+  WORKFLOW_RUN_STATUSES,
+} from "@avs/types";
 import { z } from "zod";
 
 export const bindingCheckSchema = z.object({
@@ -102,3 +112,55 @@ export const errorEnvelopeSchema = z.object({
 export function successEnvelopeSchema<T extends z.ZodTypeAny>(data: T) {
   return z.object({ success: z.literal(true), data });
 }
+
+export const sceneSchema = z.object({
+  id: z.string(),
+  project_id: z.string(),
+  scene_number: z.number().int(),
+  description: z.string(),
+  visual_prompt: z.string().nullable(),
+  voiceover: z.string().nullable(),
+  duration_seconds: z.number(),
+  visual_type: z.enum(SCENE_VISUAL_TYPES),
+  status: z.enum(SCENE_STATUSES),
+  created_at: z.string(),
+});
+export type Scene = z.infer<typeof sceneSchema>;
+
+export const jobSchema = z.object({
+  id: z.string(),
+  project_id: z.string(),
+  scene_id: z.string().nullable(),
+  agent_name: z.string(),
+  job_type: z.string(),
+  status: z.enum(JOB_STATUSES),
+  error_message: z.string().nullable(),
+  retry_count: z.number().int(),
+  max_retries: z.number().int(),
+  started_at: z.string().nullable(),
+  completed_at: z.string().nullable(),
+  created_at: z.string(),
+});
+export type Job = z.infer<typeof jobSchema>;
+
+export const workflowRunSchema = z.object({
+  id: z.string(),
+  project_id: z.string(),
+  workflow_name: z.string(),
+  workflow_instance_id: z.string().nullable(),
+  current_step: z.string().nullable(),
+  status: z.enum(WORKFLOW_RUN_STATUSES),
+  error_message: z.string().nullable(),
+  started_at: z.string().nullable(),
+  completed_at: z.string().nullable(),
+  created_at: z.string(),
+});
+export type WorkflowRun = z.infer<typeof workflowRunSchema>;
+
+/** POST /api/v1/projects/:id/generate */
+export const generateResponseSchema = z.object({
+  project_id: z.string(),
+  workflow_run_id: z.string(),
+  status: z.enum(PROJECT_STATUSES),
+});
+export type GenerateResponse = z.infer<typeof generateResponseSchema>;

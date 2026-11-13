@@ -1,4 +1,4 @@
-import { env, introspectWorkflowInstance } from "cloudflare:test";
+import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 
 describe("local Cloudflare bindings", () => {
@@ -15,11 +15,5 @@ describe("local Cloudflare bindings", () => {
     expect(await obj?.text()).toBe("hello");
     expect(obj?.httpMetadata?.contentType).toBe("text/plain");
   });
-
-  it("the production workflow runs and completes", async () => {
-    await using instance = await introspectWorkflowInstance(env.PRODUCTION_WORKFLOW, "wf-test-1");
-    await env.PRODUCTION_WORKFLOW.create({ id: "wf-test-1", params: { projectId: "project-1" } });
-    await expect(instance.waitForStepResult({ name: "validate-input" })).resolves.toBe("project-1");
-    await expect(instance.waitForStatus("complete")).resolves.not.toThrow();
-  });
+  // The production workflow itself is covered in tests/workflow.test.ts.
 });

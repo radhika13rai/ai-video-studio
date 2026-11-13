@@ -22,10 +22,10 @@ export async function createWorkflowRun(
   db: D1Database,
   userId: string,
   projectId: string,
-  input: { workflow_name: string; workflow_instance_id?: string | null },
+  input: { id?: string; workflow_name: string; workflow_instance_id?: string | null },
 ): Promise<WorkflowRun> {
   if (!input.workflow_name.trim()) throw invalidData("workflow_name is required");
-  const id = newId();
+  const id = input.id ?? newId();
   const now = nowIso();
   const res = await db
     .prepare(
