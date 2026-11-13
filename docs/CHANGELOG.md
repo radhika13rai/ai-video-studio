@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.0 (2026-11-13)
+
+- Task 8: media provider layer: FLUX and SDXL image and MeloTTS voice adapters on Workers AI with
+  byte sniffing; registry with priority, health, daily caps, usage and fallback; per-scene image
+  and narration steps in the workflow (tracked jobs, R2 storage, recorded fallbacks); asset content
+  endpoint; `GET /providers`; scene images and narration players in the dashboard; providers table
+  on the status page. Script length fixed (minimum 70%, length-constrained schema, two sentences per
+  segment), verified live. 16 new tests.
+
 ## 0.7.1 (2026-11-13)
 
 - Cloudflare resources created: D1 database `ai-video-studio` (real `database_id` in

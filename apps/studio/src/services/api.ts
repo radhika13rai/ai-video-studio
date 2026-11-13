@@ -1,5 +1,7 @@
 import type {
+  Asset,
   CreateProjectRequest,
+  ProviderStatus,
   GenerateResponse,
   HealthData,
   Job,
@@ -13,7 +15,9 @@ import type {
 import { API_PATHS, IDEMPOTENCY_HEADER } from "@avs/contracts";
 import type { ProjectStatus } from "@avs/types";
 import {
+  assetSchema,
   errorEnvelopeSchema,
+  providerStatusSchema,
   generateResponseSchema,
   healthDataSchema,
   jobSchema,
@@ -124,6 +128,12 @@ export const listScenes = (id: string): Promise<Scene[]> =>
   request(API_PATHS.projectScenes(id), z.array(sceneSchema));
 export const listJobs = (id: string): Promise<Job[]> =>
   request(API_PATHS.projectJobs(id), z.array(jobSchema));
+export const listAssets = (id: string): Promise<Asset[]> =>
+  request(API_PATHS.projectAssets(id), z.array(assetSchema));
+export const listProviders = (): Promise<ProviderStatus[]> =>
+  request(API_PATHS.providers, z.array(providerStatusSchema));
+export const assetUrl = (projectId: string, assetId: string) =>
+  `${BASE_URL}${API_PATHS.assetContent(projectId, assetId)}`;
 export const getRun = (id: string): Promise<WorkflowRun | null> =>
   request(API_PATHS.projectRun(id), workflowRunSchema.nullable());
 

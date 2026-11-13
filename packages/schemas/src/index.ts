@@ -1,5 +1,8 @@
 import {
   ASPECT_RATIOS,
+  ASSET_TYPES,
+  PROVIDER_CAPABILITIES,
+  PROVIDER_HEALTH_STATUSES,
   JOB_STATUSES,
   LIMITS,
   PROJECT_STATUSES,
@@ -164,3 +167,32 @@ export const generateResponseSchema = z.object({
   status: z.enum(PROJECT_STATUSES),
 });
 export type GenerateResponse = z.infer<typeof generateResponseSchema>;
+
+export const assetSchema = z.object({
+  id: z.string(),
+  project_id: z.string(),
+  scene_id: z.string().nullable(),
+  asset_type: z.enum(ASSET_TYPES),
+  storage_key: z.string(),
+  mime_type: z.string(),
+  file_size: z.number().nullable(),
+  source_provider: z.string().nullable(),
+  license: z.record(z.string(), z.unknown()).nullable(),
+  metadata: z.record(z.string(), z.unknown()),
+  created_at: z.string(),
+});
+export type Asset = z.infer<typeof assetSchema>;
+
+/** GET /api/v1/providers */
+export const providerStatusSchema = z.object({
+  capability: z.enum(PROVIDER_CAPABILITIES),
+  provider_name: z.string().nullable(),
+  available: z.boolean(),
+  enabled: z.boolean(),
+  health_status: z.enum(PROVIDER_HEALTH_STATUSES),
+  priority: z.number().nullable(),
+  daily_limit: z.number().nullable(),
+  used_today: z.number(),
+  note: z.string().nullable(),
+});
+export type ProviderStatus = z.infer<typeof providerStatusSchema>;

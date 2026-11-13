@@ -7,7 +7,6 @@ import { textModelFor } from "../ai/factory";
 import {
   cancelOpenJobs,
   getWorkflowRun,
-  listProvidersForCapability,
   mergeProductionConfig,
   replaceScenes,
   requireProject,
@@ -15,6 +14,13 @@ import {
   updateWorkflowRun,
 } from "../db";
 import type { Env } from "../env";
+import {
+  markSceneReady,
+  prepareMediaStage,
+  produceSceneMedia,
+  summarizeFallbacks,
+  type MediaOutcome,
+} from "./media";
 import { agentStepConfig, runAgentJob, stableUuid, type StepContext } from "./steps";
 
 export const WORKFLOW_NAME = "production-workflow";
@@ -125,21 +131,39 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, ProductionParams
         return board.scenes.length;
       });
 
-      const fallbacks = await step.do("generate-assets", async () => {
+      const scenes = await step.do("generate-assets", async () => {
         await ensureActive("generate-assets");
         await setProjectStatusIf(db, userId, projectId, ["planning"], "generating");
-        // Media providers are registered in Task 8. Without one, record the fallback openly
-        // (blueprint: never silently swap the requested visuals) and render text cards instead.
-        const needed = plan.visual_style === "image" ? "image" : "video";
-        const providers = await listProvidersForCapability(db, needed);
-        const notes =
-          providers.length > 0
-            ? []
-            : [`No ${needed} provider is configured yet; scenes will render as styled text cards.`];
-        if (plan.narration && (await listProvidersForCapability(db, "voice")).length === 0)
-          notes.push(
-            "No voice provider is configured yet; the video will have captions but no narration.",
-          );
+        return prepareMediaStage(ctx, this.env);
+      });
+
+      // One durable step per scene and medium: a failure on scene 5 never redoes scenes 1–4.
+      const outcomes: { scene: number; image: MediaOutcome; voice: MediaOutcome }[] = [];
+      for (const scene of scenes) {
+        const media = async (capability: "image" | "voice"): Promise<MediaOutcome> => {
+          if (capability === "voice" && !plan.narration)
+            return { status: "skipped", reason: "No narration planned." };
+          try {
+            return await step.do(`${capability}-scene-${scene.scene_number}`, retry, async () => {
+              await ensureActive(`${capability}-scene-${scene.scene_number}`);
+              return produceSceneMedia(ctx, this.env, scene, capability, brief.aspect_ratio);
+            });
+          } catch (err) {
+            // Retries used up: keep going with a recorded fallback instead of failing the video.
+            const message = err instanceof Error ? err.message : String(err);
+            if (/^Run is /.test(message)) throw err; // cancelled
+            return { status: "fallback", reason: message.slice(0, 200) };
+          }
+        };
+        const image = await media("image");
+        const voice = await media("voice");
+        outcomes.push({ scene: scene.scene_number, image, voice });
+      }
+
+      const fallbacks = await step.do("summarize-assets", async () => {
+        await ensureActive("summarize-assets");
+        for (const scene of scenes) await markSceneReady(ctx, scene.id);
+        const notes = summarizeFallbacks(plan.visual_style, plan.narration, outcomes);
         await mergeProductionConfig(db, userId, projectId, { fallbacks: notes });
         return notes;
       });

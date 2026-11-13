@@ -133,3 +133,21 @@ Workflows retry steps; stable IDs make each step idempotent without extra lookup
 
 Cancel marks the run `cancelled`, then terminates the instance; every step checks the run before
 working. **Why:** terminate can lag or fail; the database is the source of truth the UI reads.
+
+## 024. FLUX first, SDXL second (2026-11-13)
+
+Both were tested live with the same prompt. FLUX followed it (underwater, light from above); SDXL
+didn't (mountains above water). FLUX is square only, so the renderer crops it. **Why:** prompt
+fidelity matters more than native aspect ratio, and SDXL remains as an automatic backup.
+
+## 025. Media failures degrade a scene, not the video (2026-11-13)
+
+When no provider can produce a scene's image or narration, the workflow records a fallback and
+continues; only text planning failures fail the run. **Why:** a video with some text cards is
+better than none, and the blueprint asks for recorded, never silent, fallbacks.
+
+## 026. Constrain length in the schema, not only in words (2026-11-13)
+
+The script schema sent to the model includes the segment count and a minimum length per segment
+in characters. The prompt asks for two sentences per segment. **Why:** live runs showed Llama
+writes about half the requested words when it is only given a word count.

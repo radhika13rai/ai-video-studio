@@ -15,7 +15,9 @@ const me = route("GET", API_PATHS.me, () =>
 );
 const goTo = (path: string) => history.replaceState(null, "", path);
 const progressRoutes = () =>
-  route("GET", /\/(scenes|jobs|run)$/, (url) => ok(url.pathname.endsWith("/run") ? null : []));
+  route("GET", /\/(scenes|jobs|run|assets)$/, (url) =>
+    ok(url.pathname.endsWith("/run") ? null : []),
+  );
 
 describe("projects list", () => {
   it("shows an empty state that links to the form", async () => {
@@ -221,7 +223,7 @@ describe("project page", () => {
   it("says when a project doesn't exist", async () => {
     stubApi(
       me,
-      route("GET", /\/(scenes|jobs|run)$/, () =>
+      route("GET", /\/(scenes|jobs|run|assets)$/, () =>
         err("PROJECT_NOT_FOUND", "Project not found.", 404),
       ),
     );
@@ -287,7 +289,9 @@ describe("production controls", () => {
         return ok({ project_id: p.id, workflow_run_id: "r1", status: "planning" }, 202);
       }),
       route("GET", /\/jobs$/, () => ok(jobs)),
-      route("GET", /\/(scenes|run)$/, (url) => ok(url.pathname.endsWith("/run") ? null : [])),
+      route("GET", /\/(scenes|run|assets)$/, (url) =>
+        ok(url.pathname.endsWith("/run") ? null : []),
+      ),
     );
     goTo(`/projects/${p.id}`);
     render(<App />);
@@ -319,7 +323,7 @@ describe("production controls", () => {
           { ...job("scriptwriter", "failed"), error_message: "quota" },
         ]),
       ),
-      route("GET", /\/scenes$/, () => ok([])),
+      route("GET", /\/(scenes|assets)$/, () => ok([])),
       route("GET", /\/run$/, () =>
         ok({
           id: "r1",
@@ -370,7 +374,7 @@ describe("production controls", () => {
       me,
       route("GET", API_PATHS.project(p.id), () => ok(p)),
       route("GET", /\/scenes$/, () => ok([scene(1), scene(2)])),
-      route("GET", /\/(jobs|run)$/, (url) => ok(url.pathname.endsWith("/run") ? null : [])),
+      route("GET", /\/(jobs|run|assets)$/, (url) => ok(url.pathname.endsWith("/run") ? null : [])),
       route("POST", API_PATHS.projectCancel(p.id), () => ok({ ...p, status: "cancelled" })),
     );
     goTo(`/projects/${p.id}`);
@@ -387,5 +391,102 @@ describe("production controls", () => {
     expect(calls.some((c) => c.init.method === "POST" && c.url.pathname.endsWith("/cancel"))).toBe(
       true,
     );
+  });
+});
+
+describe("scene media and providers", () => {
+  it("shows each scene's generated image and narration player", async () => {
+    const p = makeProject({ status: "awaiting_render" });
+    const scene = {
+      id: "s1",
+      project_id: p.id,
+      scene_number: 1,
+      description: "d",
+      visual_prompt: "A glowing jellyfish",
+      voiceover: "Line one.",
+      duration_seconds: 5,
+      visual_type: "image",
+      status: "ready",
+      created_at: "2026-11-13T00:00:00Z",
+    };
+    const asset = (id: string, asset_type: string, mime_type: string) => ({
+      id,
+      project_id: p.id,
+      scene_id: "s1",
+      asset_type,
+      storage_key: `projects/${p.id}/runs/r/scene-1.${mime_type.split("/")[1]}`,
+      mime_type,
+      file_size: 10,
+      source_provider: "workers-ai-flux",
+      license: null,
+      metadata: {},
+      created_at: "2026-11-13T00:00:00Z",
+    });
+    stubApi(
+      me,
+      route("GET", API_PATHS.project(p.id), () => ok(p)),
+      route("GET", /\/scenes$/, () => ok([scene])),
+      route("GET", /\/assets$/, () =>
+        ok([asset("a1", "image", "image/jpeg"), asset("a2", "voiceover", "audio/wav")]),
+      ),
+      route("GET", /\/(jobs|run)$/, (url) => ok(url.pathname.endsWith("/run") ? null : [])),
+    );
+    goTo(`/projects/${p.id}`);
+    render(<App />);
+    const img = await screen.findByRole("img", { name: "A glowing jellyfish" });
+    expect(img.getAttribute("src")).toBe(API_PATHS.assetContent(p.id, "a1"));
+    const audio = screen.getByLabelText("Narration for scene 1");
+    expect(audio.getAttribute("src")).toBe(API_PATHS.assetContent(p.id, "a2"));
+  });
+
+  it("lists providers with today's usage on the status page", async () => {
+    stubApi(
+      me,
+      route("GET", API_PATHS.health, () =>
+        ok({
+          status: "ok",
+          service: "s",
+          version: "1",
+          environment: "test",
+          timestamp: new Date().toISOString(),
+          bindings: {
+            database: { status: "ok" },
+            storage: { status: "ok" },
+            workflows: { status: "ok" },
+          },
+        }),
+      ),
+      route("GET", API_PATHS.providers, () =>
+        ok([
+          {
+            capability: "image",
+            provider_name: "workers-ai-flux",
+            available: true,
+            enabled: true,
+            health_status: "healthy",
+            priority: 10,
+            daily_limit: 60,
+            used_today: 7,
+            note: null,
+          },
+          {
+            capability: "video",
+            provider_name: null,
+            available: false,
+            enabled: false,
+            health_status: "unknown",
+            priority: null,
+            daily_limit: null,
+            used_today: 0,
+            note: "No free video provider is integrated yet.",
+          },
+        ]),
+      ),
+    );
+    goTo("/status");
+    render(<App />);
+    expect(await screen.findByText("workers-ai-flux")).toBeTruthy();
+    expect(screen.getByText("7 / 60")).toBeTruthy();
+    expect(screen.getByText("No free video provider is integrated yet.")).toBeTruthy();
   });
 });

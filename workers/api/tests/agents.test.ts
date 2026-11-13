@@ -46,7 +46,8 @@ const BRIEF: Brief = {
   style: "documentary",
 };
 
-const words = (n: number) => Array.from({ length: n }, (_, i) => `word${i}`).join(" ");
+// Realistic word lengths: segment text has a minimum length in characters.
+const words = (n: number) => Array.from({ length: n }, () => "ocean").join(" ");
 const SCRIPT: Script = {
   title: "Deep ocean facts",
   hook: "The deep ocean is stranger than space.",
@@ -138,7 +139,7 @@ describe("scriptwriter", () => {
   });
 
   it("rejects a script that is too long for the duration", async () => {
-    const long = { ...SCRIPT, segments: [1, 2, 3, 4].map(() => ({ text: words(45) })) };
+    const long = { ...SCRIPT, segments: [1, 2, 3, 4, 5, 6].map(() => ({ text: words(30) })) };
     const { model, requests } = fakeModel(JSON.stringify(long), JSON.stringify(long));
     await expect(runScriptwriter(model, { brief: BRIEF, plan })).rejects.toMatchObject({
       kind: "invalid_output",
