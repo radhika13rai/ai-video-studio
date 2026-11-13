@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.1 (2026-11-13)
+
+- Cloudflare resources created: D1 database `ai-video-studio` (real `database_id` in
+  `wrangler.jsonc`, migrations 0001–0002 applied remotely) and R2 bucket `ai-video-studio-media`.
+  Agents verified against live Workers AI.
+
 ## 0.7.0 (2026-11-13)
 
 - Task 7: durable production workflow (director, scriptwriter and storyboard as tracked jobs with

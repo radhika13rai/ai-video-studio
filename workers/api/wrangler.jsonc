@@ -16,14 +16,12 @@
   "observability": { "enabled": true },
 
   // Local development (`wrangler dev`) simulates D1 and R2 on disk under .wrangler/state.
-  // Before the first deploy, create the real resources and paste the D1 id below
-  // (see README, "Create the Cloudflare resources"). scripts/validate-env.sh refuses to
-  // deploy while the placeholder is still here. Resource IDs are never invented.
+  // The id below is the real D1 database created on Cloudflare (not a secret).
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "ai-video-studio",
-      "database_id": "REPLACE_WITH_DATABASE_ID",
+      "database_id": "3d2f33ab-7281-43d0-8427-2874e2dcc981",
       "migrations_dir": "migrations",
     },
   ],

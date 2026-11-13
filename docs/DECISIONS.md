@@ -37,11 +37,11 @@ Originally the Worker was tested in Node. Since Task 2 its tests run under
 binding behaviour should be tested against the real runtime. (`vitest-pool-workers` is deprecated and
 requires Vitest 4.)
 
-## 008. Placeholder D1 ID, guarded at deploy (2026-11-12)
+## 008. Placeholder D1 ID, guarded at deploy (2026-11-12; resolved 2026-11-13)
 
 `wrangler.jsonc` ships with `database_id: "REPLACE_WITH_DATABASE_ID"`. **Why:** resource IDs must not
 be invented, and local development doesn't need one. `scripts/validate-env.sh` blocks deploys until
-it is replaced.
+it is replaced. Resolved: the real database was created and its ID committed (it isn't a secret).
 
 ## 009. Health reports bindings, always 200 (2026-11-12)
 
