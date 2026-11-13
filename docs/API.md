@@ -84,4 +84,4 @@ Server errors aren't stored, so a 5xx can be retried with the same key.
 
 ## Planned
 
-Scene edits, user asset upload, automated quality checks (Task 10).
+Scene text edits, user asset upload, rate limiting.

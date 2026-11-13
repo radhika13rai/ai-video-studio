@@ -1,8 +1,9 @@
-import type { Asset, Job, Project, Scene, WorkflowRun } from "@avs/contracts";
+import type { Asset, Job, Project, QualityReport, Scene, WorkflowRun } from "@avs/contracts";
 import type { ProjectStatus } from "@avs/types";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { ErrorBox } from "../components/Feedback";
 import { PipelineSteps, pipelineSteps, SceneList } from "../components/Production";
+import { QualityCard } from "../components/QualityCard";
 import { FinalVideo, RenderPanel } from "../components/RenderPanel";
 import { StatusBadge } from "../components/StatusBadge";
 import {
@@ -19,10 +20,12 @@ import {
   deleteProject,
   generateProject,
   getProject,
+  getQuality,
   getRun,
   listAssets,
   listJobs,
   listScenes,
+  retrySceneMedia,
   updateProject,
 } from "../services/api";
 
@@ -46,6 +49,7 @@ interface Progress {
   scenes: Scene[];
   assets: Asset[];
   run: WorkflowRun | null;
+  quality: QualityReport | null;
 }
 
 type State =
@@ -61,14 +65,28 @@ export function ProjectPage({ id }: { id: string }) {
     scenes: [],
     assets: [],
     run: null,
+    quality: null,
   });
+  const [retrying, setRetrying] = useState<string | null>(null);
   // One key per page visit: a double click can't start two runs.
   const generateKey = useRef(crypto.randomUUID());
 
   const loadProgress = useCallback(() => {
-    Promise.all([listJobs(id), listScenes(id), listAssets(id), getRun(id)]).then(
-      ([jobs, scenes, assets, run]) => setProgress({ jobs, scenes, assets, run }),
-      () => undefined,
+    // Each part loads independently: one failing request mustn't blank the whole panel.
+    Promise.allSettled([
+      listJobs(id),
+      listScenes(id),
+      listAssets(id),
+      getRun(id),
+      getQuality(id),
+    ]).then(([jobs, scenes, assets, run, quality]) =>
+      setProgress((prev) => ({
+        jobs: jobs.status === "fulfilled" ? jobs.value : prev.jobs,
+        scenes: scenes.status === "fulfilled" ? scenes.value : prev.scenes,
+        assets: assets.status === "fulfilled" ? assets.value : prev.assets,
+        run: run.status === "fulfilled" ? run.value : prev.run,
+        quality: quality.status === "fulfilled" ? quality.value : prev.quality,
+      })),
     );
   }, [id]);
   const [editing, setEditing] = useState(false);
@@ -186,6 +204,20 @@ export function ProjectPage({ id }: { id: string }) {
       setActionError(err instanceof Error ? err.message : "Could not cancel.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function retryScene(sceneId: string) {
+    setRetrying(sceneId);
+    setActionError(null);
+    try {
+      await retrySceneMedia(p.id, sceneId);
+      setState({ kind: "ready", project: await getProject(p.id) });
+      loadProgress();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Could not retry the scene.");
+    } finally {
+      setRetrying(null);
     }
   }
 
@@ -318,7 +350,16 @@ export function ProjectPage({ id }: { id: string }) {
 
       {finalVideo && <FinalVideo asset={finalVideo} aspect={p.aspect_ratio} />}
 
-      <SceneList scenes={progress.scenes} assets={progress.assets} />
+      {progress.quality && ["completed", "failed"].includes(p.status) && (
+        <QualityCard report={progress.quality} />
+      )}
+
+      <SceneList
+        scenes={progress.scenes}
+        assets={progress.assets}
+        retrying={retrying}
+        {...(p.status === "awaiting_render" && !rendering ? { onRetry: retryScene } : {})}
+      />
 
       <div className="danger-zone">
         <button type="button" className="btn danger" onClick={remove} disabled={busy}>

@@ -76,3 +76,28 @@ normalization, and saving a storyboard through the real repository into local D1
 - **Media fallback:** until Task 8 registers providers, the run notes, for example, "No image
   provider is configured yet; scenes will render as styled text cards", and the project page shows
   it. The requested visuals are never swapped silently.
+
+## Quality controller (`src/quality/`, deterministic)
+
+Runs in the workflow's `finish` step, after the render event. It reads the MP4 with ranged R2 reads
+(`mp4.ts`, an ISO BMFF box reader, so no decoding) and checks:
+
+| Check             | Fails when                                   | Warns when                             |
+| ----------------- | -------------------------------------------- | -------------------------------------- |
+| file              | not an MP4, no `moov`, no media data         | –                                      |
+| video             | no video track                               | codec isn't H.264                      |
+| resolution        | –                                            | not 720p or 1080p for the aspect ratio |
+| audio             | narration was generated but there's no audio | the video is silent by design          |
+| duration          | off by more than 25% of the plan             | off by more than 0.5 s                 |
+| faststart         | –                                            | `moov` after `mdat`                    |
+| bitrate           | –                                            | under 300 kb/s                         |
+| images, narration | –                                            | scenes without generated media         |
+
+Score = 100 − 30 per fail − 8 per warning. Any fail marks the project `failed` with the reasons on
+the run; otherwise it's `completed`. The report, with plain-language recommendations, is stored
+in `quality_reports` and shown on the project page. Uploads are parsed the same way, so a damaged
+MP4 is rejected before it's stored.
+
+**Retry a scene:** `POST /projects/:id/scenes/:sceneId/retry-media` regenerates only that scene's
+image and narration through the provider registry, as tracked `regenerate_*` jobs. Old files are
+replaced only after the new ones exist, and the fallback notes are recomputed.

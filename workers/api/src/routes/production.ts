@@ -1,10 +1,13 @@
 import { API_PREFIX, IDEMPOTENCY_HEADER } from "@avs/contracts";
-import type { ProjectStatus } from "@avs/types";
+import type { AspectRatio, ProjectStatus } from "@avs/types";
+import { productionPlanSchema } from "../agents";
 import { textModelFor } from "../ai/factory";
 import {
   cancelOpenJobs,
   createWorkflowRun,
   getLatestWorkflowRun,
+  listScenes,
+  mergeProductionConfig,
   requireProject,
   setProjectStatusIf,
   updateWorkflowRun,
@@ -13,6 +16,7 @@ import { ApiError } from "../lib/errors";
 import { jsonOk } from "../lib/http";
 import { withIdempotency } from "../lib/idempotency";
 import type { Router } from "../lib/router";
+import { refreshFallbacks, regenerateSceneMedia } from "../workflows/media";
 import { WORKFLOW_NAME } from "../workflows/production-workflow";
 import type { Ctx } from "./projects";
 
@@ -116,6 +120,43 @@ export function registerProductionRoutes(router: Router<Ctx>): void {
     await cancelOpenJobs(db, user.id, projectId);
     await setProjectStatusIf(db, user.id, projectId, CANCELLABLE, "cancelled");
     return jsonOk(await requireProject(db, user.id, projectId));
+  });
+
+  /** Regenerates one scene's image and narration (before rendering). Only that scene changes. */
+  router.on("POST", `${base}/scenes/:sceneId/retry-media`, async ({ env, db, user }, p) => {
+    const projectId = p.id ?? "";
+    const project = await requireProject(db, user.id, projectId);
+    if (project.status !== "awaiting_render")
+      throw new ApiError(
+        409,
+        "INVALID_STATE",
+        "Scenes can be retried once production reaches 'Ready to render'.",
+      );
+    const scene = (await listScenes(db, user.id, projectId)).find((s) => s.id === p.sceneId);
+    if (!scene) throw new ApiError(404, "NOT_FOUND", "Scene not found.");
+    const run = await getLatestWorkflowRun(db, user.id, projectId);
+    if (!run) throw new ApiError(409, "INVALID_STATE", "This project has no production run.");
+    const ctx = { db, userId: user.id, projectId, runId: run.id };
+    const result = await regenerateSceneMedia(
+      ctx,
+      env,
+      scene,
+      project.aspect_ratio as AspectRatio,
+      ["image", "voice"],
+    );
+    const plan = productionPlanSchema.safeParse(project.production_config.plan);
+    const fallbacks = await refreshFallbacks(
+      ctx,
+      plan.success ? plan.data.visual_style : "image",
+      plan.success ? plan.data.narration : true,
+    );
+    await mergeProductionConfig(db, user.id, projectId, { fallbacks });
+    return jsonOk({
+      scene_id: scene.id,
+      image: result.image ?? null,
+      voice: result.voice ?? null,
+      fallbacks,
+    });
   });
 
   router.on("GET", `${base}/run`, async ({ db, user }, p) => {

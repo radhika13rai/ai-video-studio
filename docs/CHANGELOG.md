@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.0 (2026-11-13)
+
+- Task 10: quality controller (MP4 structure via ranged R2 reads, duration, codecs, audio,
+  resolution, fast start, bitrate, scene coverage; report with score and recommendations;
+  failures fail the project); damaged uploads rejected; per-scene "Retry media"; quality card and
+  retry buttons in the dashboard; progress loads per part; CI workflow (lint, format, types, tests,
+  build, Worker dry-run); deploy workflow (migrations job, deploy, FFmpeg core, health check,
+  summary); FFmpeg core uploaded to production R2; acceptance tests mapped in `TESTING.md`.
+
 ## 0.9.0 (2026-11-13)
 
 - Task 9: browser renderer (`@avs/renderer`): Canvas frames with Ken Burns motion, balanced burned-in

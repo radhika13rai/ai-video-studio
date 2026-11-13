@@ -54,24 +54,12 @@ const provider = (
     return { bytes: b, model: "fake", units: 1, unit_type: "x", ...sniffMedia(b)! };
   },
 });
-// A tiny but real MP4 header: size + "ftyp" + brand.
-const mp4 = () =>
-  new Uint8Array([
-    0,
-    0,
-    0,
-    24,
-    ...[..."ftypisom"].map((c) => c.charCodeAt(0)),
-    0,
-    0,
-    2,
-    0,
-    ...[..."isomiso2"].map((c) => c.charCodeAt(0)),
-    1,
-    2,
-    3,
-  ]);
-
+// A real 15 s, 720×1280 H.264/AAC MP4 (solid colour and a tone), so quality checks pass.
+const fixture = (name: string) =>
+  Uint8Array.from(atob((JSON.parse(env.TEST_MP4) as Record<string, string>)[name] ?? ""), (c) =>
+    c.charCodeAt(0),
+  );
+const mp4 = () => fixture("sample-15s.mp4");
 const words = (n: number) => Array.from({ length: n }, () => "ocean").join(" ");
 const SCRIPT = JSON.stringify({
   title: "O",

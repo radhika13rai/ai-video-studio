@@ -15,6 +15,7 @@ import { ApiError } from "../lib/errors";
 import { jsonOk } from "../lib/http";
 import { readJson } from "../lib/request";
 import type { Router } from "../lib/router";
+import { bytesReader, inspectMp4 } from "../quality/mp4";
 import { RENDER_EVENT } from "../workflows/production-workflow";
 import type { Ctx } from "./projects";
 
@@ -115,9 +116,21 @@ export function registerRenderRoutes(router: Router<Ctx>): void {
         "PAYLOAD_TOO_LARGE",
         `The video must be at most ${Math.round(MAX_RENDER_BYTES / 1048576)} MB.`,
       );
-    // An MP4 starts with an `ftyp` box; reject anything else.
+    // An MP4 starts with an `ftyp` box and must contain a readable video track.
     if (bytes.byteLength < 12 || String.fromCharCode(...bytes.subarray(4, 8)) !== "ftyp")
       throw new ApiError(400, "VALIDATION_ERROR", "The upload isn't an MP4 file.");
+    let info;
+    try {
+      info = await inspectMp4(bytesReader(bytes), bytes.byteLength);
+    } catch (err) {
+      throw new ApiError(
+        400,
+        "VALIDATION_ERROR",
+        `The MP4 is damaged: ${err instanceof Error ? err.message : "unreadable"}.`,
+      );
+    }
+    if (!info.tracks.some((t) => t.kind === "video"))
+      throw new ApiError(400, "VALIDATION_ERROR", "The MP4 has no video track.");
 
     const run = await getLatestWorkflowRun(db, user.id, projectId);
     const storage_key = `projects/${projectId}/runs/${run?.id ?? "manual"}/final-${requestId.slice(0, 8)}.mp4`;
@@ -138,8 +151,9 @@ export function registerRenderRoutes(router: Router<Ctx>): void {
       license: { source: "rendered" },
       metadata: {
         render_request_id: requestId,
+        duration_seconds: Math.round(info.durationSeconds * 1000) / 1000,
         ...(Number.isFinite(durationHeader) && durationHeader > 0
-          ? { duration_seconds: durationHeader }
+          ? { reported_duration_seconds: durationHeader }
           : {}),
         encoder: (request.headers.get("x-video-encoder") ?? "").slice(0, 20),
       },

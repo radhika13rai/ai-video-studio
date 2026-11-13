@@ -2,6 +2,7 @@ import type {
   Asset,
   CreateProjectRequest,
   ProviderStatus,
+  QualityReport,
   RenderManifest,
   GenerateResponse,
   HealthData,
@@ -19,6 +20,7 @@ import {
   assetSchema,
   errorEnvelopeSchema,
   providerStatusSchema,
+  qualityReportSchema,
   renderManifestSchema,
   generateResponseSchema,
   healthDataSchema,
@@ -182,6 +184,17 @@ export async function uploadRender(
     res.status,
   );
 }
+
+export const getQuality = (id: string): Promise<QualityReport | null> =>
+  request(API_PATHS.projectQuality(id), qualityReportSchema.nullable());
+export const retrySceneMedia = (projectId: string, sceneId: string) =>
+  request(
+    API_PATHS.sceneRetryMedia(projectId, sceneId),
+    z.object({ fallbacks: z.array(z.string()) }).loose(),
+    {
+      method: "POST",
+    },
+  );
 
 export const getRun = (id: string): Promise<WorkflowRun | null> =>
   request(API_PATHS.projectRun(id), workflowRunSchema.nullable());
