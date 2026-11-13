@@ -4,14 +4,15 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev --var APP_ENV:development",
+    "dev": "wrangler dev --local --var APP_ENV:development",
     "deploy": "bash ../../scripts/validate-env.sh && wrangler deploy",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
     "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
     "cf:create": "wrangler d1 create ai-video-studio && wrangler r2 bucket create ai-video-studio-media",
-    "types": "wrangler types --check"
+    "types": "wrangler types --check",
+    "dev:ai": "wrangler dev --var APP_ENV:development"
   },
   "dependencies": {
     "@avs/contracts": "workspace:*",

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.0 (2026-11-13)
+
+- Task 6: director (deterministic classifier and pipeline planner), scriptwriter and storyboard
+  agents with JSON-schema output, validation, word and scene budgets, one corrective retry and
+  storyboard normalization; `TextModel` interface with a Workers AI adapter; `AI` binding;
+  `pnpm dev` runs local-only. 23 new tests.
+
 ## 0.5.0 (2026-11-13)
 
 - Task 5: project dashboard: list with status badges, filters, paging and polling; New video form

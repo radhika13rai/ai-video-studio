@@ -15,7 +15,7 @@ Browser (apps/studio)  ──/api/v1──▶  Worker (workers/api)  ──▶  
 - `packages/contracts`, `packages/schemas` and `packages/types` define how the parts communicate.
   Both sides import the same TypeScript source.
 
-## What exists today (Tasks 1–5)
+## What exists today (Tasks 1–6)
 
 - `GET /api/v1/health`, plus JSON 404 and 405 responses in the shared error envelope.
 - An app shell that calls the health endpoint and validates the response with Zod.
@@ -37,5 +37,9 @@ Browser (apps/studio)  ──/api/v1──▶  Worker (workers/api)  ──▶  
   (brief, rename, delete), system status page. Pages live in `src/pages`, the API client in
   `src/services/api.ts` (every response validated), routing in `src/lib/router.tsx`.
 
-Generation, agents, providers and the renderer are not implemented yet. The "Generate video" button
-is visibly disabled until Task 7.
+- Agents in `workers/api/src/agents`: a deterministic director and model-backed scriptwriter and
+  storyboard with validated JSON output, behind the `TextModel` interface (Workers AI adapter in
+  `src/ai`). See `AGENTS.md` and `PROVIDERS.md`. They aren't wired to an endpoint yet.
+
+Workflow orchestration, media providers and the renderer are not implemented yet. The "Generate
+video" button is visibly disabled until Task 7.
