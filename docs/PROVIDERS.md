@@ -11,9 +11,11 @@ Agents depend on interfaces, never on a vendor SDK (CLAUDE.md rule 10).
 | -------------------- | --------------------------------------- | ---------------------------------------------------------------------------- |
 | `WorkersAiTextModel` | Implemented, tested with a fake binding | Default model `@cf/meta/llama-3.3-70b-instruct-fp8-fast`, JSON-schema output |
 
-**Not yet verified against the live service.** The Cloudflare token saved for this project doesn't
-have Workers AI permission yet. Responses are validated before use; error 4006 (daily free
-allocation used up) maps to a non-retryable `quota` error.
+**Verified live (2026-11-13):** director → scriptwriter → storyboard ran against Workers AI through
+this adapter in about 19 s, using about 360 tokens. The run produced a valid script and 5 scenes
+totalling exactly 30 s. Finding: the script was short (39 of a 75-word budget), because the
+minimum is 50% of the budget; this is to be tightened. Responses are validated before use;
+error 4006 (daily free allocation used up) maps to a non-retryable `quota` error.
 
 Workers AI free tier: 10,000 Neurons per day at the time of writing; requests fail after that on
 the Free plan, and some models need paid billing. Check Cloudflare's current pricing.
