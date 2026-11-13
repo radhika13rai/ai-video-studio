@@ -150,3 +150,121 @@ export function summarizeFallbacks(
 
 const reasonOf = (o: MediaOutcome | undefined) =>
   o && o.status !== "ok" ? o.reason.replace(/\.$/, "") : "unknown reason";
+
+/**
+ * Regenerates one scene's image and/or narration on demand ("retry this scene"), replacing
+ * whatever that scene had. Other scenes are untouched. Each attempt is a tracked job.
+ */
+export async function regenerateSceneMedia(
+  ctx: StepContext,
+  env: Env,
+  scene: SceneRef,
+  aspect: AspectRatio,
+  capabilities: MediaCapability[],
+): Promise<Record<MediaCapability, MediaOutcome | undefined>> {
+  const out: Record<MediaCapability, MediaOutcome | undefined> = {
+    image: undefined,
+    voice: undefined,
+  };
+  const attempt = crypto.randomUUID().slice(0, 8);
+  for (const capability of capabilities) {
+    if (capability === "image" && (scene.visual_type === "text" || !scene.visual_prompt)) {
+      out.image = { status: "skipped", reason: "Scene is a text card by design." };
+      continue;
+    }
+    if (capability === "voice" && !scene.voiceover?.trim()) {
+      out.voice = { status: "skipped", reason: "Scene has no narration." };
+      continue;
+    }
+    if (!env.MEDIA) {
+      out[capability] = { status: "fallback", reason: "Media storage (R2) isn't configured." };
+      continue;
+    }
+    const media = env.MEDIA;
+    out[capability] = await runAgentJob<MediaOutcome>(
+      ctx,
+      AGENT[capability],
+      capability === "image" ? "regenerate_image" : "regenerate_voiceover",
+      null,
+      async () => {
+        try {
+          const { result, provider, attempts } = await generateMedia(
+            ctx.db,
+            env,
+            { userId: ctx.userId, projectId: ctx.projectId },
+            capability === "image"
+              ? { capability, prompt: scene.visual_prompt ?? "", aspect_ratio: aspect }
+              : { capability, text: scene.voiceover ?? "" },
+          );
+          // Only replace the old file once the new one exists.
+          const type = capability === "image" ? "image" : "voiceover";
+          for (const old of (await listAssets(ctx.db, ctx.userId, ctx.projectId)).filter(
+            (a) => a.scene_id === scene.id && a.asset_type === type,
+          )) {
+            const { storage_key } = await deleteAsset(ctx.db, ctx.userId, old.id);
+            await media.delete(storage_key);
+          }
+          const storage_key = `${runPrefix(ctx)}scene-${scene.scene_number}-${capability}-retry-${attempt}.${result.extension}`;
+          await media.put(storage_key, result.bytes, {
+            httpMetadata: { contentType: result.mime_type },
+          });
+          const asset = await createAsset(ctx.db, ctx.userId, ctx.projectId, {
+            asset_type: type,
+            storage_key,
+            mime_type: result.mime_type,
+            file_size: result.bytes.byteLength,
+            scene_id: scene.id,
+            source_provider: provider,
+            license: { source: "generated", provider, model: result.model },
+            metadata: {
+              model: result.model,
+              ...(result.width ? { width: result.width, height: result.height } : {}),
+              ...(result.duration_seconds ? { duration_seconds: result.duration_seconds } : {}),
+              attempts,
+              retried: true,
+            },
+          });
+          return {
+            output: { status: "ok", asset_id: asset.id, provider },
+            meta: { agent: AGENT[capability], model: result.model, attempts: 1 },
+          };
+        } catch (err) {
+          if (err instanceof NoProviderError)
+            return {
+              output: { status: "fallback", reason: err.message },
+              meta: { agent: AGENT[capability], model: "none", attempts: 1 },
+            };
+          throw err;
+        }
+      },
+      { jobKey: `${AGENT[capability]}:${scene.scene_number}:retry:${attempt}`, sceneId: scene.id },
+    );
+  }
+  return out;
+}
+
+/** Rebuilds the fallback notes from the assets that exist now (after a retry). */
+export async function refreshFallbacks(
+  ctx: StepContext,
+  visualStyle: "image" | "video" | "animation",
+  narration: boolean,
+): Promise<string[]> {
+  const scenes = await listScenes(ctx.db, ctx.userId, ctx.projectId);
+  const assets = await listAssets(ctx.db, ctx.userId, ctx.projectId);
+  const outcomes = scenes.map((s) => {
+    const has = (t: string) => assets.some((a) => a.scene_id === s.id && a.asset_type === t);
+    const image: MediaOutcome =
+      s.visual_type === "text" || !s.visual_prompt
+        ? { status: "skipped", reason: "text card" }
+        : has("image")
+          ? { status: "ok", asset_id: "", provider: "" }
+          : { status: "fallback", reason: "no image was generated" };
+    const voice: MediaOutcome = !s.voiceover?.trim()
+      ? { status: "skipped", reason: "no narration" }
+      : has("voiceover")
+        ? { status: "ok", asset_id: "", provider: "" }
+        : { status: "fallback", reason: "no narration was generated" };
+    return { scene: s.scene_number, image, voice };
+  });
+  return summarizeFallbacks(visualStyle, narration, outcomes);
+}

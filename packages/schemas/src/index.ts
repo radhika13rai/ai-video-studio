@@ -3,6 +3,7 @@ import {
   ASSET_TYPES,
   PROVIDER_CAPABILITIES,
   PROVIDER_HEALTH_STATUSES,
+  QUALITY_STATUSES,
   JOB_STATUSES,
   LIMITS,
   PROJECT_STATUSES,
@@ -229,3 +230,26 @@ export const renderCompleteRequestSchema = z.object({
   render_request_id: z.string().min(1),
   asset_id: z.string().min(1),
 });
+
+/** GET /api/v1/projects/:id/quality (latest report; null before the first render). */
+export const qualityReportSchema = z.object({
+  id: z.string(),
+  project_id: z.string(),
+  overall_status: z.enum(QUALITY_STATUSES),
+  score: z.number().nullable(),
+  checks: z
+    .object({
+      items: z.array(
+        z.object({
+          id: z.string(),
+          label: z.string(),
+          status: z.enum(["pass", "warn", "fail"]),
+          detail: z.string(),
+        }),
+      ),
+    })
+    .loose(),
+  recommendations: z.array(z.string()),
+  created_at: z.string(),
+});
+export type QualityReport = z.infer<typeof qualityReportSchema>;

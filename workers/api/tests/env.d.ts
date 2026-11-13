@@ -7,6 +7,8 @@ declare global {
     interface Env
       extends Required<Pick<WorkerEnv, "DB" | "MEDIA" | "PRODUCTION_WORKFLOW">>, WorkerEnv {
       TEST_MIGRATIONS: D1Migration[];
+      /** JSON map of fixture file name → base64 MP4. */
+      TEST_MP4: string;
     }
   }
 }

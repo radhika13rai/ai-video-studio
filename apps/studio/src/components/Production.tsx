@@ -112,7 +112,18 @@ export function PipelineSteps({ steps }: { steps: ReturnType<typeof pipelineStep
   );
 }
 
-export function SceneList({ scenes, assets = [] }: { scenes: Scene[]; assets?: Asset[] }) {
+export function SceneList({
+  scenes,
+  assets = [],
+  onRetry,
+  retrying,
+}: {
+  scenes: Scene[];
+  assets?: Asset[];
+  /** When set, scenes missing an image or narration get a "Retry media" button. */
+  onRetry?: (sceneId: string) => void;
+  retrying?: string | null;
+}) {
   const forScene = (id: string, type: Asset["asset_type"]) =>
     assets.find((a) => a.scene_id === id && a.asset_type === type);
   if (scenes.length === 0) return null;
@@ -164,6 +175,18 @@ export function SceneList({ scenes, assets = [] }: { scenes: Scene[]; assets?: A
                   />
                 ) : null;
               })()}
+              {onRetry &&
+                ((s.visual_type !== "text" && s.visual_prompt && !forScene(s.id, "image")) ||
+                  (s.voiceover?.trim() && !forScene(s.id, "voiceover"))) && (
+                  <button
+                    type="button"
+                    className="btn small retry"
+                    onClick={() => onRetry(s.id)}
+                    disabled={retrying != null}
+                  >
+                    {retrying === s.id ? "Retrying…" : "Retry media"}
+                  </button>
+                )}
             </div>
           </li>
         ))}

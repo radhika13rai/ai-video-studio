@@ -56,26 +56,45 @@ No Cloudflare account or secrets are needed for local development. `wrangler dev
 R2 and Workflows on disk under `workers/api/.wrangler/` (git-ignored). Delete that folder to reset
 local data.
 
-## Deploying to Cloudflare (needs your account)
+## Deploying to Cloudflare
 
-The repository never contains real resource IDs until you create them. Once, from the repo root:
+Already done for this project: the D1 database and R2 bucket exist, migrations are applied, and
+the FFmpeg core is in R2.
 
-```bash
-pnpm --filter @avs/api exec wrangler login
-pnpm --filter @avs/api cf:create          # creates the D1 database and the R2 bucket
-```
+**One-time, in the Cloudflare dashboard:**
 
-Paste the `database_id` that `wrangler d1 create` prints into `workers/api/wrangler.jsonc`,
-replacing `REPLACE_WITH_DATABASE_ID`. Then:
+1. Open **Workers & Pages** once. This creates your free `workers.dev` subdomain.
+2. Set up sign-in (free for up to 50 users): **Zero Trust** → choose a team name → **Access →
+   Applications → Add → Self-hosted**. Use the Worker's address
+   (`ai-video-studio.<subdomain>.workers.dev`) and a policy that allows your email. Copy the
+   **Application Audience (AUD) tag**.
+3. Put the team domain (`<team>.cloudflareaccess.com`) and AUD tag in `workers/api/wrangler.jsonc`
+   as `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD`. These are not secrets.
+
+Until step 3 is done, the deployed API rejects every call except `/health` (fail-closed).
+
+**Deploy by hand:**
 
 ```bash
 pnpm build
-pnpm --filter @avs/api vendor:upload      # once per FFmpeg version: puts the 32 MB core in R2
-pnpm --filter @avs/api deploy             # runs scripts/validate-env.sh first
+pnpm --filter @avs/api exec wrangler d1 migrations apply DB --remote   # reviewed migrations only
+pnpm --filter @avs/api vendor:upload                                   # once per FFmpeg version
+pnpm --filter @avs/api deploy                                          # runs validate-env.sh first
 ```
 
-`scripts/validate-env.sh` refuses to deploy while the placeholder ID is still in place. D1, R2,
-Workers and Workflows all have free tiers; check Cloudflare's current limits before relying on them.
+**Or automatically on every merge to `main`** (`.github/workflows/deploy.yml`):
+
+1. GitHub → repository **Settings → Secrets and variables → Actions**: add
+   `CLOUDFLARE_API_TOKEN` (a token with Workers Scripts, D1 and Workers R2 Storage Edit) and
+   `CLOUDFLARE_ACCOUNT_ID`.
+2. Optional: **Settings → Environments → production → Required reviewers**, so migrations and
+   deploys wait for your approval.
+
+The workflow applies migrations in its own job, deploys, uploads the FFmpeg core if it's missing,
+checks `/api/v1/health` and writes a summary. Without the secrets it reports "skipped".
+
+**Roll back** a bad release: `pnpm --filter @avs/api exec wrangler rollback`. This rolls back code
+only; D1 data stays as it is.
 
 ## Scripts
 
@@ -125,6 +144,6 @@ rejects API calls until Cloudflare Access is configured.
 - [x] 7. Workflow orchestration
 - [x] 8. Provider adapters
 - [x] 9. Browser renderer
-- [ ] 10. Quality control, CI and deployment
+- [x] 10. Quality control, CI and deployment
 
 Development rules are in [`CLAUDE.md`](CLAUDE.md).

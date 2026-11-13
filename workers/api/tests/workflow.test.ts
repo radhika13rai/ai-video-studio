@@ -5,6 +5,7 @@ import { setTextModelOverride } from "../src/ai/factory";
 import { ModelError, type TextModel } from "../src/ai/text-model";
 import {
   createAsset,
+  getLatestQualityReport,
   getLatestWorkflowRun,
   listJobs,
   listScenes,
@@ -76,7 +77,7 @@ async function newProject() {
 afterEach(() => setTextModelOverride(null));
 
 describe("production workflow", () => {
-  it("runs director → script → storyboard, waits for the render, then completes", async () => {
+  it("runs director → script → storyboard, waits for the render, then quality-checks it", async () => {
     setTextModelOverride(scripted(SCRIPT, BOARD));
     await using introspector = await introspectWorkflow(env.PRODUCTION_WORKFLOW);
     const projectId = await newProject();
@@ -91,10 +92,17 @@ describe("production workflow", () => {
     const [running] = await introspector.get();
     await running!.waitForStepResult({ name: "request-render" });
     const owner = await upsertUserByEmail(env.DB, EMAIL);
+    // A real MP4, but 15 s long for a project planned at 30 s: QC must catch the mismatch.
+    const mp4 = Uint8Array.from(
+      atob((JSON.parse(env.TEST_MP4) as Record<string, string>)["sample-15s.mp4"] ?? ""),
+      (c) => c.charCodeAt(0),
+    );
+    await env.MEDIA.put(`projects/${projectId}/final-test.mp4`, mp4);
     const video = await createAsset(env.DB, owner.id, projectId, {
       asset_type: "render",
       storage_key: `projects/${projectId}/final-test.mp4`,
       mime_type: "video/mp4",
+      file_size: mp4.length,
     });
     const [instance] = await introspector.get();
     await instance!.modify(async (m) => {
@@ -104,11 +112,15 @@ describe("production workflow", () => {
       });
     });
     await instance!.waitForStatus("complete");
-    expect(await instance!.getOutput()).toMatchObject({ status: "completed", scenes: 6 });
+    expect(await instance!.getOutput()).toMatchObject({
+      status: "quality_failed",
+      quality: "failed",
+      scenes: 6,
+    });
 
     const user = await upsertUserByEmail(env.DB, EMAIL);
     const project = await requireProject(env.DB, user.id, projectId);
-    expect(project.status).toBe("completed");
+    expect(project.status).toBe("failed");
     expect(project.production_config).toMatchObject({
       plan: { video_type: "faceless", scene_count: 6 },
       render_request: { id: renderId },
@@ -131,7 +143,10 @@ describe("production workflow", () => {
     expect(jobs.every((j) => j.status === "completed")).toBe(true);
     expect(await listScenes(env.DB, user.id, projectId)).toHaveLength(6);
     const run = await getLatestWorkflowRun(env.DB, user.id, projectId);
-    expect(run).toMatchObject({ status: "completed", current_step: "done" });
+    expect(run).toMatchObject({ status: "failed" });
+    expect(run?.error_message).toMatch(/^Quality check failed: 15\.00 s \(planned 30 s\)\./);
+    const report = await getLatestQualityReport(env.DB, user.id, projectId);
+    expect(report).toMatchObject({ overall_status: "failed" });
 
     const usage = await env.DB.prepare(
       "SELECT SUM(units_used) AS n FROM usage_events WHERE project_id = ?",

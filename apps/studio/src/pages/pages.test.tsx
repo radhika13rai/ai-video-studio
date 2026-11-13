@@ -490,3 +490,106 @@ describe("scene media and providers", () => {
     expect(screen.getByText("No free video provider is integrated yet.")).toBeTruthy();
   });
 });
+
+describe("quality report and scene retry", () => {
+  const scene = (n: number, extra: object = {}) => ({
+    id: `s${n}`,
+    project_id: "p",
+    scene_number: n,
+    description: "d",
+    visual_prompt: `Prompt ${n}`,
+    voiceover: `Line ${n}.`,
+    duration_seconds: 5,
+    visual_type: "image",
+    status: "ready",
+    created_at: "2026-11-13T00:00:00Z",
+    ...extra,
+  });
+
+  it("shows the quality report on a completed project", async () => {
+    const p = makeProject({ status: "completed" });
+    stubApi(
+      me,
+      route("GET", API_PATHS.project(p.id), () => ok(p)),
+      route("GET", /\/(scenes|jobs|assets)$/, () => ok([])),
+      route("GET", /\/run$/, () => ok(null)),
+      route("GET", /\/quality$/, () =>
+        ok({
+          id: "q1",
+          project_id: p.id,
+          overall_status: "warning",
+          score: 92,
+          checks: {
+            items: [
+              {
+                id: "file",
+                label: "Video file",
+                status: "pass",
+                detail: "Valid MP4 (isom), 6.2 MB.",
+              },
+              {
+                id: "images",
+                label: "Scene images",
+                status: "warn",
+                detail: "5 of 6 image scenes have a generated image.",
+              },
+            ],
+          },
+          recommendations: ['Scene 4 has no image; use "Retry media" on it, then render again.'],
+          created_at: "2026-11-13T00:00:00Z",
+        }),
+      ),
+    );
+    goTo(`/projects/${p.id}`);
+    render(<App />);
+    expect(await screen.findByText("Passed with warnings · 92/100")).toBeTruthy();
+    expect(screen.getByText("5 of 6 image scenes have a generated image.")).toBeTruthy();
+    expect(screen.getByText(/Scene 4 has no image/)).toBeTruthy();
+  });
+
+  it("offers Retry media only on scenes missing media, and retries just that scene", async () => {
+    const p = makeProject({ status: "awaiting_render" });
+    let images: unknown[] = [];
+    const calls = stubApi(
+      me,
+      route("GET", API_PATHS.project(p.id), () => ok(p)),
+      route("GET", /\/scenes$/, () =>
+        ok([scene(1), scene(2, { visual_type: "text", visual_prompt: null, voiceover: "" })]),
+      ),
+      route("GET", /\/assets$/, () => ok(images)),
+      route("GET", /\/(jobs|run|quality)$/, (url) =>
+        ok(url.pathname.endsWith("/jobs") ? [] : null),
+      ),
+      route("POST", /\/retry-media$/, () => {
+        images = ["image", "voiceover"].map((t, i) => ({
+          id: `a${i}`,
+          project_id: p.id,
+          scene_id: "s1",
+          asset_type: t,
+          storage_key: `k${i}`,
+          mime_type: t === "image" ? "image/jpeg" : "audio/wav",
+          file_size: 1,
+          source_provider: "x",
+          license: null,
+          metadata: {},
+          created_at: "2026-11-13T00:00:00Z",
+        }));
+        return ok({
+          scene_id: "s1",
+          image: { status: "ok" },
+          voice: { status: "ok" },
+          fallbacks: [],
+        });
+      }),
+    );
+    goTo(`/projects/${p.id}`);
+    render(<App />);
+    const buttons = await screen.findAllByRole("button", { name: "Retry media" });
+    expect(buttons).toHaveLength(1); // scene 2 is a text card with no narration
+    await userEvent.click(buttons[0]!);
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Retry media" })).toBeNull());
+    expect(
+      calls.filter((c) => c.url.pathname.endsWith("/retry-media")).map((c) => c.url.pathname),
+    ).toEqual([API_PATHS.sceneRetryMedia(p.id, "s1")]);
+  });
+});

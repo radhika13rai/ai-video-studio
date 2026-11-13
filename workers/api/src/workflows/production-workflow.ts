@@ -1,13 +1,17 @@
 import type { WorkflowEvent, WorkflowStep } from "cloudflare:workers";
 import { WorkflowEntrypoint } from "cloudflare:workers";
 import { NonRetryableError } from "cloudflare:workflows";
+import type { QualityStatus } from "@avs/types";
 import { z } from "zod";
 import { briefSchema, runDirector, runScriptwriter, runStoryboard, type Brief } from "../agents";
 import { textModelFor } from "../ai/factory";
 import {
   cancelOpenJobs,
+  createQualityReport,
   getAsset,
   getWorkflowRun,
+  listAssets,
+  listScenes,
   mergeProductionConfig,
   replaceScenes,
   requireProject,
@@ -22,6 +26,8 @@ import {
   summarizeFallbacks,
   type MediaOutcome,
 } from "./media";
+import { runQualityChecks } from "../quality/check";
+import { r2Reader } from "../quality/mp4";
 import { agentStepConfig, runAgentJob, stableUuid, type StepContext } from "./steps";
 
 export const WORKFLOW_NAME = "production-workflow";
@@ -43,7 +49,9 @@ export const renderEventSchema = z.object({ render_request_id: z.string(), asset
 export interface ProductionResult {
   projectId: string;
   runId: string;
-  status: "completed";
+  /** "quality_failed": the video was rendered but failed an automated quality check. */
+  status: "completed" | "quality_failed";
+  quality: QualityStatus;
   scenes: number;
   fallbacks: string[];
 }
@@ -193,7 +201,7 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, ProductionParams
         },
       );
 
-      await step.do("finish", async () => {
+      const quality = await step.do("finish", async (): Promise<QualityStatus> => {
         const evt = renderEventSchema.safeParse(rendered.payload);
         if (!evt.success || evt.data.render_request_id !== renderRequestId)
           throw new NonRetryableError("Render event doesn't match this run's render request.");
@@ -211,12 +219,46 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, ProductionParams
           ["awaiting_render", "rendering"],
           "quality_check",
         );
-        // Automated quality checks arrive in Task 10.
+        const report = await runQualityChecks({
+          project: await requireProject(db, userId, projectId),
+          scenes: await listScenes(db, userId, projectId),
+          assets: await listAssets(db, userId, projectId),
+          narrationPlanned: plan.narration,
+          video: this.env.MEDIA
+            ? {
+                read: r2Reader(this.env.MEDIA, video.storage_key),
+                size: video.file_size ?? (await this.env.MEDIA.head(video.storage_key))?.size ?? 0,
+              }
+            : null,
+        });
+        await createQualityReport(db, userId, projectId, {
+          overall_status: report.overall_status,
+          score: report.score,
+          checks: { items: report.checks, mp4: report.mp4 },
+          recommendations: report.recommendations,
+        });
+        if (report.overall_status === "failed") {
+          await setProjectStatusIf(db, userId, projectId, ["quality_check"], "failed");
+          const failed = report.checks.filter((c) => c.status === "fail").map((c) => c.detail);
+          await updateWorkflowRun(db, userId, runId, {
+            status: "failed",
+            error_message: `Quality check failed: ${failed.join(" ")}`,
+          });
+          return report.overall_status;
+        }
         await setProjectStatusIf(db, userId, projectId, ["quality_check"], "completed");
         await updateWorkflowRun(db, userId, runId, { status: "completed", current_step: "done" });
+        return report.overall_status;
       });
 
-      return { projectId, runId, status: "completed", scenes: sceneCount, fallbacks };
+      return {
+        projectId,
+        runId,
+        status: quality === "failed" ? "quality_failed" : "completed",
+        quality,
+        scenes: sceneCount,
+        fallbacks,
+      };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       await step.do("record-failure", async () => {

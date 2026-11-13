@@ -170,3 +170,21 @@ headers, and it stays inside the free tier.
 The multi-threaded core needs `SharedArrayBuffer`, which needs COOP/COEP headers on every page and
 breaks embedding cross-origin media. **Why:** with WebCodecs doing the heavy video work, FFmpeg
 only muxes and encodes AAC, so threads add complexity for little gain.
+
+## 030. Quality checks read the MP4's structure in the Worker (2026-11-13)
+
+A small ISO BMFF reader parses `moov` with ranged R2 reads; there's no decoding and no external
+service. **Why:** structure, codecs, size and duration catch the real failure modes (broken upload,
+missing audio, wrong length) within Worker limits; perceptual checks would need compute we don't
+pay for.
+
+## 031. A quality failure fails the project, warnings don't (2026-11-13)
+
+**Why:** an unplayable or silent-by-mistake video must not look "completed", but a missing image
+on one scene still makes a usable video, so it's a warning with a retry suggestion.
+
+## 032. Deploys from CI are opt-in and migrations are a separate job (2026-11-13)
+
+The deploy workflow runs only when the Cloudflare secrets exist, applies migrations in their own
+job behind a `production` environment, then deploys and health-checks. **Why:** the blueprint asks
+to keep production migrations separate, and a fresh fork shouldn't fail CI for missing secrets.

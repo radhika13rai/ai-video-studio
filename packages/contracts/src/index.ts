@@ -22,6 +22,8 @@ export const API_PATHS = {
     `${API_PREFIX}/projects/${encodeURIComponent(id)}/render/upload?render_request_id=${encodeURIComponent(renderRequestId)}`,
   projectRenderComplete: (id: string) =>
     `${API_PREFIX}/projects/${encodeURIComponent(id)}/render/complete`,
+  sceneRetryMedia: (projectId: string, sceneId: string) =>
+    `${API_PREFIX}/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/retry-media`,
   projectRenderAbort: (id: string) =>
     `${API_PREFIX}/projects/${encodeURIComponent(id)}/render/abort`,
 } as const;
@@ -93,6 +95,7 @@ export type {
   Job,
   Project,
   ProviderStatus,
+  QualityReport,
   RenderManifest,
   ProjectPage,
   Scene,

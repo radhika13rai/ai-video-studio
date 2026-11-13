@@ -15,7 +15,7 @@ Browser (apps/studio)  ──/api/v1──▶  Worker (workers/api)  ──▶  
 - `packages/contracts`, `packages/schemas` and `packages/types` define how the parts communicate.
   Both sides import the same TypeScript source.
 
-## What exists today (Tasks 1–9)
+## What exists today (Tasks 1–10)
 
 - `GET /api/v1/health`, plus JSON 404 and 405 responses in the shared error envelope.
 - An app shell that calls the health endpoint and validates the response with Zod.
@@ -51,4 +51,8 @@ Browser (apps/studio)  ──/api/v1──▶  Worker (workers/api)  ──▶  
 - Browser renderer (`renderer/`): Canvas frames, Web Audio narration, WebCodecs/FFmpeg.wasm encoding
   to H.264/AAC MP4, upload to R2 and a workflow event to finish. See `RENDERER.md`.
 
-Automated quality checks and deployment (Task 10) are not implemented yet.
+- Quality control (`src/quality`): after the render, the Worker reads the MP4's structure from R2
+  (tracks, codecs, size, duration, fast start) and checks scene coverage, then writes a quality
+  report and marks the project completed or failed. Scenes missing media can be retried one at
+  a time.
+- CI on every push and PR; a deploy workflow for `main`. See `TESTING.md` and the README.
