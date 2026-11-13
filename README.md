@@ -119,7 +119,7 @@ rejects API calls until Cloudflare Access is configured.
 - [x] 2. Cloudflare foundation (Wrangler, D1, R2, Workflows, local development)
 - [x] 3. Database (nine tables, migrations, repository functions)
 - [x] 4. API foundation (project CRUD, validation, errors, authentication)
-- [ ] 5. Project dashboard
+- [x] 5. Project dashboard
 - [ ] 6. Director and creative agents
 - [ ] 7. Workflow orchestration
 - [ ] 8. Provider adapters

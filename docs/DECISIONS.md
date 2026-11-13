@@ -86,3 +86,15 @@ an open API.
 
 `POST /projects` honours `Idempotency-Key` using a reservation row (migration 0002). **Why:** mobile
 retries shouldn't create duplicate projects; D1 is already there, so no new service is needed.
+
+## 016. Frontend routing without a library (2026-11-13)
+
+`src/lib/router.tsx` uses the History API: `navigate()`, `usePath()`, `<Link>` and `matchRoute()`
+for five routes. **Why:** five static routes don't justify react-router; the Worker already serves
+`index.html` for unknown paths. Revisit when routes need nesting or loaders.
+
+## 017. Polling for status updates (2026-11-13)
+
+The list and project pages refetch every 5 seconds only while a project is in an active status
+(planning, generating, rendering, quality check). **Why:** the blueprint picks polling for the MVP;
+it costs nothing when nothing is running and needs no WebSocket service.

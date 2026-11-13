@@ -15,7 +15,7 @@ Browser (apps/studio)  ──/api/v1──▶  Worker (workers/api)  ──▶  
 - `packages/contracts`, `packages/schemas` and `packages/types` define how the parts communicate.
   Both sides import the same TypeScript source.
 
-## What exists today (Tasks 1–4)
+## What exists today (Tasks 1–5)
 
 - `GET /api/v1/health`, plus JSON 404 and 405 responses in the shared error envelope.
 - An app shell that calls the health endpoint and validates the response with Zod.
@@ -32,4 +32,10 @@ Browser (apps/studio)  ──/api/v1──▶  Worker (workers/api)  ──▶  
   authentication: Cloudflare Access in production, a developer identity locally. See `API.md` and
   `SECURITY.md`.
 
-Generation, agents, providers and the renderer are not implemented yet.
+- Dashboard in `apps/studio`: project list (status filter, paging, badges, polling while in
+  production), New video form (client-side Zod validation, Idempotency-Key per form), project page
+  (brief, rename, delete), system status page. Pages live in `src/pages`, the API client in
+  `src/services/api.ts` (every response validated), routing in `src/lib/router.tsx`.
+
+Generation, agents, providers and the renderer are not implemented yet. The "Generate video" button
+is visibly disabled until Task 7.

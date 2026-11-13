@@ -1,0 +1,253 @@
+import { API_PATHS } from "@avs/contracts";
+import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
+import { App } from "../app/App";
+import { err, makeProject, ok, route, stubApi } from "../test/fake-api";
+
+const me = route("GET", API_PATHS.me, () =>
+  ok({
+    id: "u1",
+    email: "dev@example.com",
+    display_name: "dev",
+    created_at: "2026-11-13T00:00:00Z",
+  }),
+);
+const goTo = (path: string) => history.replaceState(null, "", path);
+
+describe("projects list", () => {
+  it("shows an empty state that links to the form", async () => {
+    stubApi(
+      me,
+      route("GET", API_PATHS.projects, () => ok({ items: [], next_cursor: null })),
+    );
+    render(<App />);
+    expect(await screen.findByText("No projects yet")).toBeTruthy();
+    await userEvent.click(screen.getByRole("link", { name: "Create your first video" }));
+    expect(location.pathname).toBe("/projects/new");
+    expect(await screen.findByRole("heading", { name: "New video" })).toBeTruthy();
+  });
+
+  it("renders project cards with status badges and loads more pages", async () => {
+    const a = makeProject({ title: "Alpha", status: "completed" });
+    const b = makeProject({ title: "Beta", status: "failed" });
+    const c = makeProject({ title: "Gamma" });
+    const calls = stubApi(
+      me,
+      route("GET", API_PATHS.projects, (url) =>
+        url.searchParams.get("cursor")
+          ? ok({ items: [c], next_cursor: null })
+          : ok({ items: [a, b], next_cursor: "next-1" }),
+      ),
+    );
+    render(<App />);
+    const alpha = await screen.findByRole("link", { name: /Alpha/ });
+    expect(within(alpha).getByText("Completed")).toBeTruthy();
+    expect(within(screen.getByRole("link", { name: /Beta/ })).getByText("Failed")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Load more" }));
+    expect(await screen.findByRole("link", { name: /Gamma/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
+    expect(calls.some((c) => c.url.searchParams.get("cursor") === "next-1")).toBe(true);
+  });
+
+  it("filters by status", async () => {
+    const calls = stubApi(
+      me,
+      route("GET", API_PATHS.projects, (url) =>
+        ok({
+          items:
+            url.searchParams.get("status") === "failed"
+              ? [makeProject({ title: "Broken", status: "failed" })]
+              : [],
+          next_cursor: null,
+        }),
+      ),
+    );
+    render(<App />);
+    await screen.findByText("No projects yet");
+    await userEvent.click(screen.getByRole("button", { name: "Failed" }));
+    expect(await screen.findByRole("link", { name: /Broken/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Failed" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    expect(calls.at(-1)?.url.searchParams.get("status")).toBe("failed");
+  });
+
+  it("shows a retryable error", async () => {
+    let fail = true;
+    stubApi(
+      me,
+      route("GET", API_PATHS.projects, () =>
+        fail
+          ? err("INTERNAL_ERROR", "Database is down.", 500)
+          : ok({ items: [], next_cursor: null }),
+      ),
+    );
+    render(<App />);
+    expect(await screen.findByText("Database is down.")).toBeTruthy();
+    fail = false;
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("No projects yet")).toBeTruthy();
+  });
+});
+
+describe("new project form", () => {
+  it("validates before sending anything", async () => {
+    const calls = stubApi(me);
+    goTo("/projects/new");
+    render(<App />);
+    await userEvent.click(await screen.findByRole("button", { name: "Create project" }));
+    expect(screen.getByText("Give your video a title.")).toBeTruthy();
+    expect(screen.getByText("Describe your video.")).toBeTruthy();
+    expect(calls.filter((c) => c.init.method === "POST")).toHaveLength(0);
+  });
+
+  it("creates the project with an idempotency key and opens it", async () => {
+    const created = makeProject({ title: "Mars", aspect_ratio: "16:9" });
+    const calls = stubApi(
+      me,
+      route("POST", API_PATHS.projects, () => ok(created, 201)),
+      route("GET", API_PATHS.project(created.id), () => ok(created)),
+      route("GET", /\/(scenes|jobs)$/, () => ok([])),
+    );
+    goTo("/projects/new");
+    render(<App />);
+    await userEvent.type(await screen.findByLabelText("Title"), "Mars");
+    await userEvent.type(
+      screen.getByLabelText("What should the video be about?"),
+      "Three facts about Mars",
+    );
+    await userEvent.click(screen.getByLabelText(/16:9/));
+    await userEvent.type(screen.getByLabelText(/Style/), "documentary");
+    await userEvent.click(screen.getByRole("button", { name: "Create project" }));
+
+    await waitFor(() => expect(location.pathname).toBe(`/projects/${created.id}`));
+    const post = calls.find((c) => c.init.method === "POST");
+    expect(JSON.parse(String(post?.init.body))).toMatchObject({
+      title: "Mars",
+      prompt: "Three facts about Mars",
+      aspect_ratio: "16:9",
+      style: "documentary",
+      duration_seconds: 30,
+    });
+    expect((post?.init.headers as Record<string, string>)["Idempotency-Key"]).toMatch(
+      /^[0-9a-f-]{36}$/,
+    );
+    expect(await screen.findByRole("heading", { name: /Mars/ })).toBeTruthy();
+  });
+
+  it("shows the server's error message", async () => {
+    stubApi(
+      me,
+      route("POST", API_PATHS.projects, () => err("VALIDATION_ERROR", "prompt: Too long", 400)),
+    );
+    goTo("/projects/new");
+    render(<App />);
+    await userEvent.type(await screen.findByLabelText("Title"), "T");
+    await userEvent.type(screen.getByLabelText("What should the video be about?"), "P");
+    await userEvent.click(screen.getByRole("button", { name: "Create project" }));
+    expect(await screen.findByText("prompt: Too long")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Create project" })).toHaveProperty(
+      "disabled",
+      false,
+    );
+  });
+});
+
+describe("project page", () => {
+  it("shows details, renames and deletes", async () => {
+    const p = makeProject({ title: "Old name", production_config: { style: "noir" } });
+    const calls = stubApi(
+      me,
+      route("GET", API_PATHS.project(p.id), () => ok(p)),
+      route("GET", /\/(scenes|jobs)$/, () => ok([])),
+      route("PATCH", API_PATHS.project(p.id), (_u, init) =>
+        ok({ ...p, ...(JSON.parse(String(init.body)) as object) }),
+      ),
+      route("DELETE", API_PATHS.project(p.id), () =>
+        ok({ id: p.id, deleted: true, media_deleted: 0 }),
+      ),
+      route("GET", API_PATHS.projects, () => ok({ items: [], next_cursor: null })),
+    );
+    goTo(`/projects/${p.id}`);
+    render(<App />);
+    expect(await screen.findByRole("heading", { name: /Old name/ })).toBeTruthy();
+    expect(screen.getByText("noir")).toBeTruthy();
+    expect(screen.getByText("Draft")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Generate video" })).toHaveProperty("disabled", true);
+    expect(await screen.findByText("0 scenes · 0 jobs so far.")).toBeTruthy();
+
+    await userEvent.click(screen.getByRole("button", { name: "Rename" }));
+    const input = screen.getByLabelText("Project title");
+    await userEvent.clear(input);
+    await userEvent.type(input, "New name");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByRole("heading", { name: /New name/ })).toBeTruthy();
+    expect(JSON.parse(String(calls.find((c) => c.init.method === "PATCH")?.init.body))).toEqual({
+      title: "New name",
+    });
+
+    vi.stubGlobal(
+      "confirm",
+      vi.fn(() => true),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Delete project" }));
+    await waitFor(() => expect(location.pathname).toBe("/"));
+    expect(calls.some((c) => c.init.method === "DELETE")).toBe(true);
+  });
+
+  it("keeps the project when delete is not confirmed", async () => {
+    const p = makeProject();
+    const calls = stubApi(
+      me,
+      route("GET", API_PATHS.project(p.id), () => ok(p)),
+      route("GET", /\/(scenes|jobs)$/, () => ok([])),
+    );
+    goTo(`/projects/${p.id}`);
+    render(<App />);
+    vi.stubGlobal(
+      "confirm",
+      vi.fn(() => false),
+    );
+    await userEvent.click(await screen.findByRole("button", { name: "Delete project" }));
+    expect(calls.some((c) => c.init.method === "DELETE")).toBe(false);
+  });
+
+  it("says when a project doesn't exist", async () => {
+    stubApi(
+      me,
+      route("GET", /\/(scenes|jobs)$/, () => err("PROJECT_NOT_FOUND", "Project not found.", 404)),
+    );
+    goTo("/projects/missing-id");
+    render(<App />);
+    expect(await screen.findByRole("heading", { name: "Project not found" })).toBeTruthy();
+  });
+
+  it("polls while the project is in production", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const p = makeProject({ status: "generating" });
+    let status = "generating";
+    stubApi(
+      me,
+      route("GET", API_PATHS.project(p.id), () => ok({ ...p, status })),
+      route("GET", /\/(scenes|jobs)$/, () => ok([])),
+    );
+    goTo(`/projects/${p.id}`);
+    render(<App />);
+    expect(await screen.findByText("Generating")).toBeTruthy();
+    status = "completed";
+    await vi.advanceTimersByTimeAsync(5100);
+    expect(await screen.findByText("Completed")).toBeTruthy();
+    vi.useRealTimers();
+  });
+});
+
+describe("navigation", () => {
+  it("shows the signed-in user and a not-found page", async () => {
+    stubApi(me);
+    goTo("/nowhere");
+    render(<App />);
+    expect(await screen.findByText("Page not found")).toBeTruthy();
+    expect(await screen.findByText("dev")).toBeTruthy();
+  });
+});
