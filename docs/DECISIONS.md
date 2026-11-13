@@ -98,3 +98,20 @@ for five routes. **Why:** five static routes don't justify react-router; the Wor
 The list and project pages refetch every 5 seconds only while a project is in an active status
 (planning, generating, rendering, quality check). **Why:** the blueprint picks polling for the MVP;
 it costs nothing when nothing is running and needs no WebSocket service.
+
+## 018. Deterministic director (2026-11-13)
+
+Video-type classification and pipeline planning use keyword rules and a lookup table, not a model.
+**Why:** CLAUDE.md rule 15. Routing is cheap to get right with rules, costs no quota and is fully
+testable. Revisit if real briefs show frequent misclassification.
+
+## 019. One corrective retry for model output (2026-11-13)
+
+Invalid JSON or a broken budget gets one retry that quotes the problem, then the agent fails with a
+retryable `invalid_output`. **Why:** most bad replies are fixed by one precise correction; more
+retries burn the free Neuron allowance. The workflow (Task 7) decides whether to try again later.
+
+## 020. Workers AI is remote-only, so local dev runs without it (2026-11-13)
+
+`pnpm dev` uses `wrangler dev --local` and tests set `remoteBindings: false`. **Why:** development
+and CI must work with no Cloudflare account; real AI is opt-in with `dev:ai`.

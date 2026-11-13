@@ -35,6 +35,10 @@
     },
   ],
 
+  // Workers AI (free daily allowance). Always runs on Cloudflare, even under `wrangler dev`, so it
+  // needs a logged-in account; tests use a scripted fake model instead.
+  "ai": { "binding": "AI" },
+
   "workflows": [
     {
       "name": "production-workflow",
