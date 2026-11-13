@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0 (2026-11-13)
+
+- Task 5: project dashboard: list with status badges, filters, paging and polling; New video form
+  with validation and duplicate protection; project page with rename and delete; status page;
+  responsive layout. Validated API client. 22 new frontend tests and a browser end-to-end run.
+
 ## 0.4.0 (2026-11-12)
 
 - Task 4: project API (`/me`, create, list, get, patch, delete, scenes, jobs, assets, quality),
