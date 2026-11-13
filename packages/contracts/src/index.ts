@@ -14,6 +14,9 @@ export const API_PATHS = {
   projectGenerate: (id: string) => `${API_PREFIX}/projects/${encodeURIComponent(id)}/generate`,
   projectCancel: (id: string) => `${API_PREFIX}/projects/${encodeURIComponent(id)}/cancel`,
   projectRun: (id: string) => `${API_PREFIX}/projects/${encodeURIComponent(id)}/run`,
+  assetContent: (projectId: string, assetId: string) =>
+    `${API_PREFIX}/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/content`,
+  providers: `${API_PREFIX}/providers`,
 } as const;
 
 /** Header that makes a POST safe to retry: the same key replays the first response. */
@@ -72,8 +75,10 @@ export type {
   CreateProjectRequest,
   GenerateResponse,
   HealthData,
+  Asset,
   Job,
   Project,
+  ProviderStatus,
   ProjectPage,
   Scene,
   UpdateProjectRequest,

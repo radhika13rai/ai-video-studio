@@ -1,4 +1,4 @@
-import type { Job, Project, Scene, WorkflowRun } from "@avs/contracts";
+import type { Asset, Job, Project, Scene, WorkflowRun } from "@avs/contracts";
 import type { ProjectStatus } from "@avs/types";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { ErrorBox } from "../components/Feedback";
@@ -19,6 +19,7 @@ import {
   generateProject,
   getProject,
   getRun,
+  listAssets,
   listJobs,
   listScenes,
   updateProject,
@@ -42,6 +43,7 @@ const CANCELLABLE: ProjectStatus[] = [
 interface Progress {
   jobs: Job[];
   scenes: Scene[];
+  assets: Asset[];
   run: WorkflowRun | null;
 }
 
@@ -53,13 +55,18 @@ type State =
 
 export function ProjectPage({ id }: { id: string }) {
   const [state, setState] = useState<State>({ kind: "loading" });
-  const [progress, setProgress] = useState<Progress>({ jobs: [], scenes: [], run: null });
+  const [progress, setProgress] = useState<Progress>({
+    jobs: [],
+    scenes: [],
+    assets: [],
+    run: null,
+  });
   // One key per page visit: a double click can't start two runs.
   const generateKey = useRef(crypto.randomUUID());
 
   const loadProgress = useCallback(() => {
-    Promise.all([listJobs(id), listScenes(id), getRun(id)]).then(
-      ([jobs, scenes, run]) => setProgress({ jobs, scenes, run }),
+    Promise.all([listJobs(id), listScenes(id), listAssets(id), getRun(id)]).then(
+      ([jobs, scenes, assets, run]) => setProgress({ jobs, scenes, assets, run }),
       () => undefined,
     );
   }, [id]);
@@ -294,7 +301,7 @@ export function ProjectPage({ id }: { id: string }) {
         </div>
       </div>
 
-      <SceneList scenes={progress.scenes} />
+      <SceneList scenes={progress.scenes} assets={progress.assets} />
 
       <div className="danger-zone">
         <button type="button" className="btn danger" onClick={remove} disabled={busy}>

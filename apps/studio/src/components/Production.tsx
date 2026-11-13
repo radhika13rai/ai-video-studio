@@ -1,4 +1,5 @@
-import type { Job, Project, Scene, WorkflowRun } from "@avs/contracts";
+import type { Asset, Job, Project, Scene, WorkflowRun } from "@avs/contracts";
+import { assetUrl } from "../services/api";
 import type { ProjectStatus } from "@avs/types";
 
 type StepState = "done" | "active" | "pending" | "failed" | "skipped";
@@ -111,7 +112,9 @@ export function PipelineSteps({ steps }: { steps: ReturnType<typeof pipelineStep
   );
 }
 
-export function SceneList({ scenes }: { scenes: Scene[] }) {
+export function SceneList({ scenes, assets = [] }: { scenes: Scene[]; assets?: Asset[] }) {
+  const forScene = (id: string, type: Asset["asset_type"]) =>
+    assets.find((a) => a.scene_id === id && a.asset_type === type);
   if (scenes.length === 0) return null;
   const total = scenes.reduce((n, s) => n + s.duration_seconds, 0);
   return (
@@ -125,14 +128,43 @@ export function SceneList({ scenes }: { scenes: Scene[] }) {
       <ol className="scenes">
         {scenes.map((s) => (
           <li key={s.id} className="scene">
-            <div className="scene-head">
-              <strong>Scene {s.scene_number}</strong>
-              <span className="muted">
-                {s.duration_seconds}s · {s.visual_type}
-              </span>
+            {(() => {
+              const image = forScene(s.id, "image");
+              return image ? (
+                <img
+                  className="scene-image"
+                  src={assetUrl(image.project_id, image.id)}
+                  alt={s.visual_prompt ?? `Scene ${s.scene_number}`}
+                  loading="lazy"
+                />
+              ) : (
+                <div className="scene-image placeholder" aria-hidden="true">
+                  {s.visual_type === "text" ? "Text card" : "No image yet"}
+                </div>
+              );
+            })()}
+            <div className="scene-body">
+              <div className="scene-head">
+                <strong>Scene {s.scene_number}</strong>
+                <span className="muted">
+                  {s.duration_seconds}s · {s.visual_type}
+                </span>
+              </div>
+              {s.voiceover && <p className="voiceover">“{s.voiceover}”</p>}
+              {s.visual_prompt && <p className="visual muted">🎨 {s.visual_prompt}</p>}
+              {(() => {
+                const voice = forScene(s.id, "voiceover");
+                return voice ? (
+                  <audio
+                    className="scene-audio"
+                    controls
+                    preload="none"
+                    src={assetUrl(voice.project_id, voice.id)}
+                    aria-label={`Narration for scene ${s.scene_number}`}
+                  />
+                ) : null;
+              })()}
             </div>
-            {s.voiceover && <p className="voiceover">“{s.voiceover}”</p>}
-            {s.visual_prompt && <p className="visual muted">🎨 {s.visual_prompt}</p>}
           </li>
         ))}
       </ol>

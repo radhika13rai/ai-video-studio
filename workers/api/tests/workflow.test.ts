@@ -26,7 +26,8 @@ function call(path: string, init: RequestInit & { json?: unknown } = {}) {
   });
 }
 
-const words = (n: number) => Array.from({ length: n }, (_, i) => `w${i}`).join(" ");
+// Realistic word lengths: segment text has a minimum length in characters.
+const words = (n: number) => Array.from({ length: n }, () => "ocean").join(" ");
 const SCRIPT = JSON.stringify({
   title: "Ocean",
   hook: "The ocean hides secrets.",
@@ -101,14 +102,22 @@ describe("production workflow", () => {
       plan: { video_type: "faceless", scene_count: 6 },
       render_request: { id: renderId },
     });
-    expect((project.production_config.fallbacks as string[])[0]).toMatch(/No image provider/);
+    const notes = project.production_config.fallbacks as string[];
+    expect(notes[0]).toMatch(
+      /6 of 6 scenes have no generated image \(No image provider is configured\)/,
+    );
+    expect(notes[1]).toMatch(/6 of 6 scenes have no narration audio/);
 
     const jobs = await listJobs(env.DB, user.id, projectId);
-    expect(jobs.map((j) => [j.agent_name, j.status])).toEqual([
+    expect(jobs.slice(0, 3).map((j) => [j.agent_name, j.status])).toEqual([
       ["director", "completed"],
       ["scriptwriter", "completed"],
       ["storyboard", "completed"],
     ]);
+    // One image and one narration job per scene, completed with a recorded fallback.
+    expect(jobs.filter((j) => j.agent_name === "visual-artist")).toHaveLength(6);
+    expect(jobs.filter((j) => j.agent_name === "voice-director")).toHaveLength(6);
+    expect(jobs.every((j) => j.status === "completed")).toBe(true);
     expect(await listScenes(env.DB, user.id, projectId)).toHaveLength(6);
     const run = await getLatestWorkflowRun(env.DB, user.id, projectId);
     expect(run).toMatchObject({ status: "completed", current_step: "done" });

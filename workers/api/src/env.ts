@@ -12,6 +12,8 @@ export interface Env {
   MAX_PROJECT_SCENES?: string;
   /** "workers-ai" (default) or "none" to disable text generation (local dev, tests). */
   AI_TEXT_PROVIDER?: string;
+  /** "workers-ai" (default) or "none" to disable image and voice generation. */
+  AI_MEDIA_PROVIDER?: string;
   /** Delay between retries of AI steps, e.g. "10 seconds" (default). Tests shorten it. */
   WORKFLOW_RETRY_DELAY?: string;
   /** Optional override of the Workers AI text model id. */

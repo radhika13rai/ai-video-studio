@@ -12,9 +12,10 @@ Agents depend on interfaces, never on a vendor SDK (CLAUDE.md rule 10).
 | `WorkersAiTextModel` | Implemented, tested with a fake binding | Default model `@cf/meta/llama-3.3-70b-instruct-fp8-fast`, JSON-schema output |
 
 **Verified live (2026-11-13):** director → scriptwriter → storyboard ran against Workers AI through
-this adapter in about 19 s, using about 360 tokens. The run produced a valid script and 5 scenes
-totalling exactly 30 s. Finding: the script was short (39 of a 75-word budget), because the
-minimum is 50% of the budget; this is to be tightened. Responses are validated before use;
+this adapter. The first run's script was far too short (39 of 75 words). Fixes: a minimum of 70% of
+the budget, "exactly two sentences per segment" instructions, segment count and minimum length in
+the output schema, and a specific correction message. Later runs gave 73–74 words, and their
+narration fills the scenes (4.3–5.0 s of voice for 5 s scenes). Responses are validated before use;
 error 4006 (daily free allocation used up) maps to a non-retryable `quota` error.
 
 Workers AI free tier: 10,000 Neurons per day at the time of writing; requests fail after that on
@@ -32,6 +33,52 @@ Workers AI always runs on Cloudflare. `pnpm dev` uses `wrangler dev --local`, so
 an account and the `AI` binding is unavailable. With `wrangler login` done, `pnpm --filter
 @avs/api dev:ai` connects the real binding (it uses your free allowance). Tests never call it.
 
-## Image, video, voice and music
+## Media (`workers/api/src/providers/`)
 
-Arrive in Task 8, behind the same kind of interface and the provider registry in D1.
+`MediaProvider.generate(request)` returns bytes plus their sniffed type, size or duration, and usage
+units. It throws `ProviderError` (`quota`, `unavailable`, `bad_response`, `unsupported`).
+
+| Capability | Provider (registry name) | Model                                            | Order | Daily cap* | Notes                                                                                                                       |
+| ---------- | ------------------------ | ------------------------------------------------ | ----- | ---------- | --------------------------------------------------------------------------------------------------------------------------- |
+| image      | `workers-ai-flux`        | `@cf/black-forest-labs/flux-1-schnell` (4 steps) | 1     | 60         | Best prompt-following in testing. Square 1024², so 9:16 is cropped by the renderer; prompts ask for a centred subject       |
+| image      | `workers-ai-sdxl`        | `@cf/bytedance/stable-diffusion-xl-lightning`    | 2     | 60         | Native 768×1344 / 1344×768, free in beta, but weaker prompt-following (drew above-water mountains for an underwater prompt) |
+| voice      | `workers-ai-melotts`     | `@cf/myshell-ai/melotts`                         | 1     | 300        | About $0.0002 per audio minute; returns 44.1 kHz mono WAV                                                                   |
+| video      | none                     | –                                                | –     | –          | No free video model; recorded fallback: still images with motion effects                                                    |
+| music      | none                     | –                                                | –     | –          | Not integrated                                                                                                              |
+
+\*Our own safety caps, stored in `providers.quota_metadata.daily_limit` and editable in D1. They
+are not Cloudflare's numbers; the real free-tier limit (Neurons per day) still applies and surfaces
+as a `quota` error. Partner models (Leonardo, Deepgram Aura, FLUX.2) are billed separately and are
+deliberately not used.
+
+**Sniffing, not trusting:** in live tests SDXL returned JPEG although its schema says PNG, and
+MeloTTS returned WAV although its schema says MP3. `sniffMedia` reads the bytes to decide the
+type, dimensions and duration, and anything that isn't real media is rejected.
+
+### Registry and fallback
+
+`generateMedia` syncs code providers into the `providers` table, inserting rows that are missing
+and never overwriting edits. It then tries enabled providers in order: healthy first, then by
+priority.
+
+- A provider at its daily cap is skipped.
+- A quota error moves on to the next provider.
+- A transient failure marks the provider `degraded` and moves on.
+- Success records usage and marks the provider `healthy`.
+- When nothing works it throws `NoProviderError`, listing every attempt, with `retryable` set if a
+  later retry could help.
+
+In the workflow, each scene's image and narration is its own durable step and tracked job
+(`visual-artist`, `voice-director`). A transient failure retries the step. When no provider can
+produce the media, the scene continues with a recorded fallback ("2 of 3 scenes have no generated
+image (…); they will render as styled text cards"). Files go to
+`projects/<id>/runs/<runId>/scene-<n>-<image|voice>.<ext>`, and media from earlier runs is deleted
+when a new run reaches this stage.
+
+`GET /projects/:id/assets/:assetId/content` streams a file from the private bucket, only to the
+project's owner. `GET /providers` lists every capability with its availability, health and usage
+today.
+
+### Switches
+
+`AI_MEDIA_PROVIDER` is `workers-ai` when deployed and `none` under `pnpm dev` and in tests.

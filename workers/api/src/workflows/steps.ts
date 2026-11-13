@@ -51,9 +51,10 @@ export async function runAgentJob<T extends object>(
   jobType: string,
   model: TextModel | null,
   work: () => Promise<AgentResult<T>>,
+  opts: { jobKey?: string; sceneId?: string } = {},
 ): Promise<T> {
   const { db, userId, projectId, runId } = ctx;
-  const jobId = await stableUuid(`${runId}:${agent}`);
+  const jobId = await stableUuid(`${runId}:${opts.jobKey ?? agent}`);
   let job =
     (await getJob(db, userId, jobId)) ??
     (await createJob(db, userId, projectId, {
@@ -61,6 +62,7 @@ export async function runAgentJob<T extends object>(
       agent_name: agent,
       job_type: jobType,
       input: { workflow_run_id: runId },
+      ...(opts.sceneId ? { scene_id: opts.sceneId } : {}),
       max_retries: AGENT_STEP_RETRIES,
     }));
   if (job.status === "completed") return (job.output?.result ?? {}) as T;

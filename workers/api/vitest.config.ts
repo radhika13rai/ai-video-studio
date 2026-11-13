@@ -17,6 +17,7 @@ export default defineConfig({
           TEST_MIGRATIONS: migrations,
           APP_ENV: "test",
           AI_TEXT_PROVIDER: "none",
+          AI_MEDIA_PROVIDER: "none",
           WORKFLOW_RETRY_DELAY: "1 second",
         },
       },
