@@ -15,6 +15,11 @@
 
   "observability": { "enabled": true },
 
+  // Served at the project's own domain (rawwgrid.com's DNS is on Cloudflare). Cloudflare creates
+  // the DNS record and certificate on deploy. The workers.dev address is switched off.
+  "workers_dev": false,
+  "routes": [{ "pattern": "studio.rawwgrid.com", "custom_domain": true }],
+
   // Local development (`wrangler dev`) simulates D1 and R2 on disk under .wrangler/state.
   // The id below is the real D1 database created on Cloudflare (not a secret).
   "d1_databases": [
