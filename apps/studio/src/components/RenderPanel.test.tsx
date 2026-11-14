@@ -3,7 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { err, makeProject, ok, route, stubApi } from "../test/fake-api";
-import { FinalVideo, RenderPanel } from "./RenderPanel";
+import { FinalVideo, RenderPanel, renderRetryOf } from "./RenderPanel";
 
 const renderVideo = vi.fn();
 vi.mock("@avs/renderer", () => ({ renderVideo: (...args: unknown[]) => renderVideo(...args) }));
@@ -114,6 +114,32 @@ describe("RenderPanel", () => {
     await userEvent.click(screen.getByRole("button", { name: "Render video" }));
     expect(await screen.findByText(/isn't ready to render/)).toBeTruthy();
     expect(renderVideo).not.toHaveBeenCalled();
+  });
+
+  it("explains a retry after a failed quality check, and stays quiet on the first attempt", () => {
+    const retry = makeProject({
+      status: "awaiting_render",
+      production_config: {
+        render_request: {
+          id: "rr-2",
+          attempt: 2,
+          max_attempts: 3,
+          last_failure: "Quality check failed: 2.00 s (planned 15 s).",
+        },
+      },
+    });
+    const { unmount } = render(<RenderPanel project={retry} onFinished={vi.fn()} />);
+    expect(screen.getByRole("status").textContent).toMatch(
+      /Attempt 2 of 3.*2\.00 s \(planned 15 s\).*scenes, images and narration are kept/s,
+    );
+    unmount();
+    const first = makeProject({
+      status: "awaiting_render",
+      production_config: { render_request: { id: "rr-1", attempt: 1, max_attempts: 3 } },
+    });
+    render(<RenderPanel project={first} onFinished={vi.fn()} />);
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(renderRetryOf({})).toBeNull();
   });
 
   it("allows only one render per browser", async () => {

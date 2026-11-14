@@ -6,7 +6,7 @@ import { listAssets, listJobs, listScenes, requireProject, upsertUserByEmail } f
 import { sniffMedia } from "../src/providers/media-bytes";
 import { setMediaProvidersOverride } from "../src/providers/registry";
 import { ProviderError, type MediaProvider } from "../src/providers/types";
-import { runQualityChecks } from "../src/quality/check";
+import { plausibleRenderPlan, runQualityChecks } from "../src/quality/check";
 import { bytesReader, inspectMp4, Mp4Error, r2Reader } from "../src/quality/mp4";
 
 const fixture = (name: string) =>
@@ -130,6 +130,61 @@ describe("quality checks", () => {
       status: "fail",
       detail: expect.stringMatching(/planned 30 s/),
     });
+  });
+
+  it("doesn't fail a render whose scenes were lengthened to fit the narration", async () => {
+    // 15 s file, brief planned 10 s, renderer planned 15 s after fitting the voice.
+    const r = await runQualityChecks({
+      project: { aspect_ratio: "9:16", duration_seconds: 10 },
+      scenes,
+      assets,
+      narrationPlanned: true,
+      renderPlanSeconds: 15,
+      video: video("sample-15s.mp4"),
+    });
+    const byId = Object.fromEntries(r.checks.map((c) => [c.id, c]));
+    expect(byId.render_length).toMatchObject({ status: "pass" });
+    expect(byId.duration).toMatchObject({
+      status: "warn",
+      detail: expect.stringMatching(/lengthened to fit the narration/),
+    });
+    expect(r.overall_status).not.toBe("failed");
+  });
+
+  it("still fails a truncated render against what the renderer planned", async () => {
+    // 2 s file, but the renderer planned 4 s (within 2× of the 3 s brief): truncated.
+    const r = await runQualityChecks({
+      project: { aspect_ratio: "9:16", duration_seconds: 3 },
+      scenes,
+      assets,
+      narrationPlanned: true,
+      renderPlanSeconds: 4,
+      video: video("sample-2s.mp4"),
+    });
+    expect(r.checks.find((c) => c.id === "render_length")).toMatchObject({
+      status: "fail",
+      detail: expect.stringMatching(/the render planned 4\.00 s/),
+    });
+    expect(r.overall_status).toBe("failed");
+  });
+
+  it("ignores an implausible reported plan and falls back to the brief", async () => {
+    expect(plausibleRenderPlan(undefined, 30)).toBeNull();
+    expect(plausibleRenderPlan(Number.NaN, 30)).toBeNull();
+    expect(plausibleRenderPlan(10, 30)).toBeNull(); // under half the brief
+    expect(plausibleRenderPlan(75, 30)).toBeNull(); // over twice the brief
+    expect(plausibleRenderPlan(95, 60)).toBeNull(); // over 1.5× the maximum video length
+    expect(plausibleRenderPlan(36, 30)).toBe(36);
+    const r = await runQualityChecks({
+      project: { aspect_ratio: "9:16", duration_seconds: 30 },
+      scenes,
+      assets,
+      narrationPlanned: true,
+      renderPlanSeconds: 2, // a client claiming it planned 2 s doesn't excuse a 2 s video
+      video: video("sample-2s.mp4"),
+    });
+    expect(r.checks.find((c) => c.id === "render_length")).toBeUndefined();
+    expect(r.checks.find((c) => c.id === "duration")).toMatchObject({ status: "fail" });
   });
 
   it("warns on wrong resolution, no fast start and missing scene media, with advice", async () => {

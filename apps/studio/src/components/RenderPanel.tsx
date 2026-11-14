@@ -42,6 +42,7 @@ export function RenderPanel({
   );
   const [music, setMusic] = useState<boolean>(() => remembered("avs-music", "on") === "on");
   const abortRef = useRef<AbortController | null>(null);
+  const retry = renderRetryOf(project.production_config);
   const running = state.kind === "running";
 
   useEffect(() => {
@@ -166,6 +167,15 @@ export function RenderPanel({
         <p className="small">✓ Uploaded. Finishing up…</p>
       ) : (
         <>
+          {retry && (
+            <p className="small render-retry" role="status">
+              <strong>
+                Attempt {retry.attempt} of {retry.max}
+              </strong>
+              {retry.reason ? `: the last render failed its quality check (${retry.reason})` : ""}.
+              Your scenes, images and narration are kept; render again to try once more.
+            </p>
+          )}
           <div className="quality" role="group" aria-label="Quality">
             {(["720p", "1080p"] as const).map((q) => (
               <button
@@ -218,6 +228,24 @@ export function RenderPanel({
       )}
     </div>
   );
+}
+
+/** Render attempt info written by the workflow after a failed quality check (attempt 2+). */
+export function renderRetryOf(
+  config: Record<string, unknown>,
+): { attempt: number; max: number; reason: string | null } | null {
+  const r = config.render_request as
+    { attempt?: unknown; max_attempts?: unknown; last_failure?: unknown } | undefined;
+  if (!r || typeof r.attempt !== "number" || r.attempt < 2) return null;
+  const reason =
+    typeof r.last_failure === "string"
+      ? r.last_failure.replace(/^Quality check failed:\s*/, "").slice(0, 160)
+      : null;
+  return {
+    attempt: r.attempt,
+    max: typeof r.max_attempts === "number" ? r.max_attempts : r.attempt,
+    reason,
+  };
 }
 
 function remembered<T extends string>(key: string, fallback: T): T {

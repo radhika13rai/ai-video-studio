@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.0 (2026-11-14)
+
+- Quality check: the length is judged against what the renderer planned (scenes fitted to the
+  narration), with a separate "Render length" check that still catches truncated videos; extra
+  length versus the brief is a warning.
+- Render retries: a failed quality check allows another render (up to 3 per run) without
+  regenerating the script, images or narration; the render panel shows "Attempt 2 of 3" and why.
+
 ## 1.1.1 (2026-11-14)
 
 - Voice and depth models run in background workers with time limits and a live seconds counter;

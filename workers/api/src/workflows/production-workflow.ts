@@ -42,7 +42,12 @@ const paramsSchema = z.object({
 });
 export type ProductionParams = z.infer<typeof paramsSchema>;
 
-export const renderRequestIdFor = (runId: string) => stableUuid(`${runId}:render`);
+/** Render attempts per production run; a failed quality check uses one up. */
+export const MAX_RENDER_ATTEMPTS = 3;
+
+/** Attempt 1 keeps the original id, so runs started before retries existed still match. */
+export const renderRequestIdFor = (runId: string, attempt = 1) =>
+  stableUuid(attempt === 1 ? `${runId}:render` : `${runId}:render:${attempt}`);
 
 export const renderEventSchema = z.object({ render_request_id: z.string(), asset_id: z.string() });
 
@@ -69,9 +74,10 @@ const PRODUCTION_STATUSES = [
  * or deploy resumes where it stopped. Each agent runs as a tracked job with the same retry policy
  * as its step. Stages:
  *   planning  → director, scriptwriter, storyboard (scenes saved to D1)
- *   generating → media assets (providers arrive in Task 8; until then a recorded fallback)
- *   awaiting_render → waits for the browser render (Task 9) with a bounded timeout
- *   quality_check → final checks (Task 10), then completed
+ *   generating → images and narration per scene (recorded fallback when no provider works)
+ *   awaiting_render → waits for the browser render with a bounded timeout
+ *   quality_check → final checks, then completed; a failed check goes back to awaiting_render
+ *                   for another attempt (up to MAX_RENDER_ATTEMPTS) without regenerating media
  */
 export class ProductionWorkflow extends WorkflowEntrypoint<Env, ProductionParams> {
   override async run(
@@ -177,79 +183,117 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, ProductionParams
         return notes;
       });
 
-      const renderRequestId = await step.do("request-render", async () => {
-        await ensureActive("request-render");
-        // Derived from the run, so a retried step keeps the same id the browser was given.
-        const id = await renderRequestIdFor(runId);
-        await mergeProductionConfig(db, userId, projectId, {
-          render_request: { id, requested_at: new Date().toISOString() },
-        });
-        await setProjectStatusIf(db, userId, projectId, ["generating"], "awaiting_render");
-        await updateWorkflowRun(db, userId, runId, {
-          status: "waiting",
-          current_step: "awaiting-render",
-        });
-        return id;
-      });
-
-      // The browser renders the video and the completion endpoint (Task 9) sends this event.
-      const rendered = await step.waitForEvent<z.infer<typeof renderEventSchema>>(
-        "wait-for-render",
-        {
-          type: RENDER_EVENT,
-          timeout: RENDER_TIMEOUT,
-        },
-      );
-
-      const quality = await step.do("finish", async (): Promise<QualityStatus> => {
-        const evt = renderEventSchema.safeParse(rendered.payload);
-        if (!evt.success || evt.data.render_request_id !== renderRequestId)
-          throw new NonRetryableError("Render event doesn't match this run's render request.");
-        const video = await getAsset(db, userId, evt.data.asset_id);
-        if (!video || video.project_id !== projectId || video.asset_type !== "render")
-          throw new NonRetryableError("The rendered video is missing.");
-        await updateWorkflowRun(db, userId, runId, {
-          status: "running",
-          current_step: "quality-check",
-        });
-        await setProjectStatusIf(
-          db,
-          userId,
-          projectId,
-          ["awaiting_render", "rendering"],
-          "quality_check",
-        );
-        const report = await runQualityChecks({
-          project: await requireProject(db, userId, projectId),
-          scenes: await listScenes(db, userId, projectId),
-          assets: await listAssets(db, userId, projectId),
-          narrationPlanned: plan.narration,
-          video: this.env.MEDIA
-            ? {
-                read: r2Reader(this.env.MEDIA, video.storage_key),
-                size: video.file_size ?? (await this.env.MEDIA.head(video.storage_key))?.size ?? 0,
-              }
-            : null,
-        });
-        await createQualityReport(db, userId, projectId, {
-          overall_status: report.overall_status,
-          score: report.score,
-          checks: { items: report.checks, mp4: report.mp4 },
-          recommendations: report.recommendations,
-        });
-        if (report.overall_status === "failed") {
-          await setProjectStatusIf(db, userId, projectId, ["quality_check"], "failed");
-          const failed = report.checks.filter((c) => c.status === "fail").map((c) => c.detail);
-          await updateWorkflowRun(db, userId, runId, {
-            status: "failed",
-            error_message: `Quality check failed: ${failed.join(" ")}`,
+      // Render attempts. Attempt 1 keeps the original step names so runs that were already
+      // waiting when retries were added still resume; later attempts get a suffix.
+      let quality: QualityStatus = "failed";
+      let lastFailure: string | null = null;
+      for (let attempt = 1; attempt <= MAX_RENDER_ATTEMPTS; attempt++) {
+        const sfx = attempt === 1 ? "" : `-${attempt}`;
+        const failure = lastFailure;
+        const renderRequestId = await step.do(`request-render${sfx}`, async () => {
+          await ensureActive(`request-render${sfx}`);
+          // Derived from the run, so a retried step keeps the same id the browser was given.
+          const id = await renderRequestIdFor(runId, attempt);
+          await mergeProductionConfig(db, userId, projectId, {
+            render_request: {
+              id,
+              requested_at: new Date().toISOString(),
+              attempt,
+              max_attempts: MAX_RENDER_ATTEMPTS,
+              ...(failure ? { last_failure: failure } : {}),
+            },
           });
-          return report.overall_status;
-        }
-        await setProjectStatusIf(db, userId, projectId, ["quality_check"], "completed");
-        await updateWorkflowRun(db, userId, runId, { status: "completed", current_step: "done" });
-        return report.overall_status;
-      });
+          await setProjectStatusIf(
+            db,
+            userId,
+            projectId,
+            ["generating", "quality_check"],
+            "awaiting_render",
+          );
+          await updateWorkflowRun(db, userId, runId, {
+            status: "waiting",
+            current_step: attempt === 1 ? "awaiting-render" : `awaiting-render-${attempt}`,
+          });
+          return id;
+        });
+
+        // The browser renders the video and the completion endpoint sends this event.
+        const rendered = await step.waitForEvent<z.infer<typeof renderEventSchema>>(
+          `wait-for-render${sfx}`,
+          { type: RENDER_EVENT, timeout: RENDER_TIMEOUT },
+        );
+
+        const finalAttempt = attempt === MAX_RENDER_ATTEMPTS;
+        const outcome = await step.do(
+          `finish${sfx}`,
+          async (): Promise<{ quality: QualityStatus; failure: string | null }> => {
+            const evt = renderEventSchema.safeParse(rendered.payload);
+            if (!evt.success || evt.data.render_request_id !== renderRequestId)
+              throw new NonRetryableError("Render event doesn't match this run's render request.");
+            const video = await getAsset(db, userId, evt.data.asset_id);
+            if (!video || video.project_id !== projectId || video.asset_type !== "render")
+              throw new NonRetryableError("The rendered video is missing.");
+            await updateWorkflowRun(db, userId, runId, {
+              status: "running",
+              current_step: `quality-check${sfx}`,
+            });
+            await setProjectStatusIf(
+              db,
+              userId,
+              projectId,
+              ["awaiting_render", "rendering"],
+              "quality_check",
+            );
+            const reported = video.metadata.reported_duration_seconds;
+            const report = await runQualityChecks({
+              project: await requireProject(db, userId, projectId),
+              scenes: await listScenes(db, userId, projectId),
+              assets: await listAssets(db, userId, projectId),
+              narrationPlanned: plan.narration,
+              renderPlanSeconds: typeof reported === "number" ? reported : null,
+              video: this.env.MEDIA
+                ? {
+                    read: r2Reader(this.env.MEDIA, video.storage_key),
+                    size:
+                      video.file_size ?? (await this.env.MEDIA.head(video.storage_key))?.size ?? 0,
+                  }
+                : null,
+            });
+            await createQualityReport(db, userId, projectId, {
+              overall_status: report.overall_status,
+              score: report.score,
+              checks: { items: report.checks, mp4: report.mp4, attempt },
+              recommendations: report.recommendations,
+            });
+            if (report.overall_status !== "failed") {
+              await setProjectStatusIf(db, userId, projectId, ["quality_check"], "completed");
+              await updateWorkflowRun(db, userId, runId, {
+                status: "completed",
+                current_step: "done",
+              });
+              return { quality: report.overall_status, failure: null };
+            }
+            const failed = report.checks.filter((c) => c.status === "fail").map((c) => c.detail);
+            const message = `Quality check failed: ${failed.join(" ")}`;
+            if (finalAttempt) {
+              await setProjectStatusIf(db, userId, projectId, ["quality_check"], "failed");
+              await updateWorkflowRun(db, userId, runId, {
+                status: "failed",
+                error_message:
+                  MAX_RENDER_ATTEMPTS > 1
+                    ? `${message} (after ${MAX_RENDER_ATTEMPTS} render attempts)`
+                    : message,
+              });
+            }
+            // Otherwise the next attempt's request step moves the project back to
+            // "Ready to render"; scenes, images and narration are kept as they are.
+            return { quality: "failed", failure: message };
+          },
+        );
+        quality = outcome.quality;
+        lastFailure = outcome.failure;
+        if (quality !== "failed") break;
+      }
 
       return {
         projectId,

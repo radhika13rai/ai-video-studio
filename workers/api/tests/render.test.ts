@@ -195,6 +195,60 @@ describe("browser render API", () => {
     }
   }, 30_000);
 
+  it("a render that fails its quality check can be rendered again, and the old request is refused", async () => {
+    const { projectId, introspector, instance } = await readyProject();
+    const renderOnce = async (file: string, headers: Record<string, string> = {}) => {
+      const start = await call(API_PATHS.projectRender(projectId), { method: "POST" });
+      expect(start.status).toBe(200);
+      const manifest = renderManifestSchema.parse(((await start.json()) as { data: unknown }).data);
+      const upload = await call(
+        API_PATHS.projectRenderUpload(projectId, manifest.render_request_id),
+        {
+          method: "POST",
+          body: fixture(file),
+          headers: { "content-type": "video/mp4", ...headers },
+        },
+      );
+      expect(upload.status).toBe(201);
+      const asset = ((await upload.json()) as { data: { id: string } }).data;
+      return { requestId: manifest.render_request_id, assetId: asset.id };
+    };
+    try {
+      const user = await upsertUserByEmail(env.DB, EMAIL);
+      // Attempt 1: a 2 s video for a 15 s project fails the length check.
+      const first = await renderOnce("sample-2s.mp4");
+      const done1 = await call(
+        API_PATHS.projectRenderComplete(projectId),
+        json({ render_request_id: first.requestId, asset_id: first.assetId }),
+      );
+      expect(done1.status).toBe(202);
+      await instance.waitForStepResult({ name: "request-render-2" });
+      await expect
+        .poll(async () => (await requireProject(env.DB, user.id, projectId)).status)
+        .toBe("awaiting_render");
+
+      // The first attempt's request id is no longer accepted.
+      const stale = await call(
+        API_PATHS.projectRenderComplete(projectId),
+        json({ render_request_id: first.requestId, asset_id: first.assetId }),
+      );
+      expect(stale.status).toBe(409);
+
+      // Attempt 2 with the right length completes the project.
+      const second = await renderOnce("sample-15s.mp4", { "x-video-duration": "15" });
+      expect(second.requestId).not.toBe(first.requestId);
+      const done2 = await call(
+        API_PATHS.projectRenderComplete(projectId),
+        json({ render_request_id: second.requestId, asset_id: second.assetId }),
+      );
+      expect(done2.status).toBe(202);
+      await instance.waitForStatus("complete");
+      expect((await requireProject(env.DB, user.id, projectId)).status).toBe("completed");
+    } finally {
+      await introspector.dispose();
+    }
+  }, 30_000);
+
   it("rejects uploads that aren't MP4, are for an old request, or come before the render starts", async () => {
     const { projectId, introspector } = await readyProject();
     try {
