@@ -1,4 +1,4 @@
-import { API_PATHS, API_PREFIX, FFMPEG_CORE_BASE, MAX_RENDER_BYTES } from "@avs/contracts";
+import { API_PATHS, API_PREFIX, MAX_RENDER_BYTES, VENDOR_FILES } from "@avs/contracts";
 import { renderCompleteRequestSchema, type RenderManifest } from "@avs/schemas";
 import {
   createAsset,
@@ -59,6 +59,7 @@ export function registerRenderRoutes(router: Router<Ctx>): void {
         duration_seconds: s.duration_seconds,
         visual_type: s.visual_type,
         caption: (s.voiceover ?? "").trim() || s.description,
+        narration: (s.voiceover ?? "").trim() || null,
         image_url: image ? url(image.id) : null,
         voice_url: voice ? url(voice.id) : null,
       };
@@ -214,19 +215,28 @@ export function registerRenderRoutes(router: Router<Ctx>): void {
  * Serves the FFmpeg.wasm core (32 MB, over the 25 MiB static-asset limit) from R2. Public,
  * immutable and versioned; uploaded with `pnpm --filter @avs/api vendor:upload`.
  */
+const VENDOR_BY_PATH = new Map(VENDOR_FILES.map((f) => [`/vendor/${f.path}`, f]));
+
+/** Keys of vendor files that are not in R2 yet (reported by /health so deploys upload them). */
+export async function missingVendorFiles(env: Env): Promise<string[]> {
+  if (!env.MEDIA) return VENDOR_FILES.map((f) => f.path);
+  const heads = await Promise.all(VENDOR_FILES.map((f) => env.MEDIA?.head(`vendor/${f.path}`)));
+  return VENDOR_FILES.filter((_, i) => !heads[i]).map((f) => f.path);
+}
+
+/** Serves pinned third-party renderer files (FFmpeg core, ONNX runtime, models) from R2. */
 export async function serveVendor(env: Env, pathname: string): Promise<Response | null> {
-  if (!pathname.startsWith(`${FFMPEG_CORE_BASE}/`)) return null;
-  const file = pathname.slice(FFMPEG_CORE_BASE.length + 1);
-  if (!["ffmpeg-core.js", "ffmpeg-core.wasm"].includes(file))
-    return new Response("Not found", { status: 404 });
-  const object = await env.MEDIA?.get(`vendor${pathname.slice("/vendor".length)}`);
+  if (!pathname.startsWith("/vendor/")) return null;
+  const file = VENDOR_BY_PATH.get(pathname);
+  if (!file) return new Response("Not found", { status: 404 });
+  const object = await env.MEDIA?.get(`vendor/${file.path}`);
   if (!object)
-    return new Response("FFmpeg core is not uploaded. Run: pnpm --filter @avs/api vendor:upload", {
+    return new Response(`${file.path} is not uploaded. Run: pnpm --filter @avs/api vendor:upload`, {
       status: 404,
     });
   return new Response(object.body, {
     headers: {
-      "content-type": file.endsWith(".wasm") ? "application/wasm" : "text/javascript",
+      "content-type": file.contentType,
       "content-length": String(object.size),
       "cache-control": "public, max-age=31536000, immutable",
       "x-content-type-options": "nosniff",

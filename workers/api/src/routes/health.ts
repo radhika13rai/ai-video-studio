@@ -1,6 +1,7 @@
 import type { BindingCheck, HealthData } from "@avs/contracts";
 import type { Env } from "../env";
 import { jsonOk } from "../lib/http";
+import { missingVendorFiles } from "./render";
 
 export const SERVICE_NAME = "ai-video-studio-api";
 export const SERVICE_VERSION = "0.1.0";
@@ -39,6 +40,7 @@ export async function handleHealth(env: Env): Promise<Response> {
     environment: env.APP_ENV ?? "development",
     timestamp: new Date().toISOString(),
     bindings,
+    missing_vendor_files: env.MEDIA ? await missingVendorFiles(env) : [],
   };
   // Always 200: the endpoint answered. `status` and `bindings` say what is degraded.
   return jsonOk(data);

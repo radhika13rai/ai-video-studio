@@ -1,12 +1,12 @@
 import type { Asset, Project } from "@avs/contracts";
-import { MAX_RENDER_BYTES } from "@avs/contracts";
+import { KOKORO_VOICES, MAX_RENDER_BYTES, type KokoroVoiceId } from "@avs/contracts";
 import type { RenderProgress, RenderStage } from "@avs/renderer";
 import { useEffect, useRef, useState } from "react";
 import { abortRender, assetUrl, completeRender, startRender, uploadRender } from "../services/api";
 import { ErrorBox } from "./Feedback";
 
 const STAGES: { key: RenderStage | "upload" | "finish"; label: string }[] = [
-  { key: "loading", label: "Loading images and narration" },
+  { key: "loading", label: "Preparing pictures, depth and voice" },
   { key: "frames", label: "Drawing frames" },
   { key: "audio", label: "Mixing audio" },
   { key: "encoding", label: "Encoding MP4" },
@@ -37,6 +37,10 @@ export function RenderPanel({
 }) {
   const [state, setState] = useState<State>({ kind: "idle" });
   const [quality, setQuality] = useState<"720p" | "1080p">("720p");
+  const [voice, setVoice] = useState<KokoroVoiceId>(() =>
+    remembered("avs-voice", KOKORO_VOICES[0].id),
+  );
+  const [music, setMusic] = useState<boolean>(() => remembered("avs-music", "on") === "on");
   const abortRef = useRef<AbortController | null>(null);
   const running = state.kind === "running";
 
@@ -66,6 +70,8 @@ export function RenderPanel({
         const { renderVideo } = await import("@avs/renderer"); // loaded only when needed
         const result = await renderVideo(manifest, {
           quality,
+          voice,
+          music,
           signal: ctrl.signal,
           onProgress: (p: RenderProgress) =>
             setState({
@@ -173,16 +179,61 @@ export function RenderPanel({
               </button>
             ))}
           </div>
+          <label className="field">
+            <span className="small">Voice</span>
+            <select
+              value={voice}
+              onChange={(e) => {
+                const v = e.target.value as KokoroVoiceId;
+                setVoice(v);
+                remember("avs-voice", v);
+              }}
+            >
+              {KOKORO_VOICES.map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="check small">
+            <input
+              type="checkbox"
+              checked={music}
+              onChange={(e) => {
+                setMusic(e.target.checked);
+                remember("avs-music", e.target.checked ? "on" : "off");
+              }}
+            />{" "}
+            Background music
+          </label>
           <button type="button" className="btn primary wide" onClick={() => void run()}>
             Render video
           </button>
           <p className="muted small">
-            Takes about a minute in your browser. Nothing is uploaded until it's done.
+            Takes a few minutes in your browser (the first time also downloads the voice and 3D
+            models, about 120 MB). Nothing is uploaded until it's done.
           </p>
         </>
       )}
     </div>
   );
+}
+
+function remembered<T extends string>(key: string, fallback: T): T {
+  try {
+    return (localStorage.getItem(key) as T | null) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function remember(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* private mode: the choice just isn't remembered */
+  }
 }
 
 export function FinalVideo({ asset, aspect }: { asset: Asset; aspect: string }) {

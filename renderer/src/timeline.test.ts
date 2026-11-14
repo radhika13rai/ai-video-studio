@@ -8,8 +8,15 @@ import {
   motionFor,
   outputSize,
   sceneAt,
+  activeWords,
+  shotsFor,
+  transitionAt,
+  TRANSITION_FRAMES,
+  wordGroups,
+  wordTimings,
   wrapText,
 } from "./timeline";
+import { fitSpeed } from "./voice";
 import { encodeWav } from "./wav";
 
 const manifest = (durations: number[]): RenderManifest => ({
@@ -120,5 +127,72 @@ describe("wav", () => {
     expect(dv.getUint32(40, true)).toBe(16);
     expect(dv.getInt16(44 + 4 * 1, true)).toBe(32767);
     expect(dv.getInt16(44 + 4 * 3 + 2, true)).toBe(-32768);
+  });
+});
+
+describe("shots", () => {
+  it("splits a scene into shots of about 2–3 seconds that cover it exactly", () => {
+    const shots = shotsFor(0, 240); // 8 s
+    expect(shots.length).toBe(3);
+    expect(shots[0]?.startFrame).toBe(0);
+    expect(shots.reduce((n, s) => n + s.frameCount, 0)).toBe(240);
+    for (let i = 1; i < shots.length; i++)
+      expect(shots[i]?.startFrame).toBe(
+        (shots[i - 1]?.startFrame ?? 0) + (shots[i - 1]?.frameCount ?? 0),
+      );
+  });
+
+  it("opens wide and punches in on later shots, the same way every render", () => {
+    const shots = shotsFor(2, 240);
+    expect(Math.min(shots[0]!.zoomFrom, shots[0]!.zoomTo)).toBeLessThan(1.2);
+    expect(Math.min(shots[1]!.zoomFrom, shots[1]!.zoomTo)).toBeGreaterThanOrEqual(1.3);
+    expect(shotsFor(2, 240)).toEqual(shots);
+    expect(shotsFor(3, 240)).not.toEqual(shots);
+  });
+
+  it("keeps a short scene as a single shot", () => {
+    expect(shotsFor(0, 45)).toHaveLength(1);
+  });
+});
+
+describe("transitions", () => {
+  it("blends across each cut and nowhere else", () => {
+    const { scenes } = buildTimeline(manifest([3, 3]));
+    const cut = scenes[1]!.startFrame;
+    expect(transitionAt(scenes, 10)).toBeNull();
+    const before = transitionAt(scenes, cut - TRANSITION_FRAMES / 2);
+    expect(before?.progress).toBeCloseTo(0);
+    expect(transitionAt(scenes, cut)?.progress).toBeCloseTo(0.5);
+    expect(transitionAt(scenes, cut + TRANSITION_FRAMES / 2)).toBeNull();
+    expect(before?.from.index).toBe(0);
+    expect(before?.to.index).toBe(1);
+  });
+});
+
+describe("word-by-word captions", () => {
+  it("times words within the spoken audio, longer words taking longer", () => {
+    const words = wordTimings("Drink water. Hydration matters", 0.1, 3);
+    expect(words[0]?.start).toBeCloseTo(0.1);
+    expect(words[words.length - 1]?.end).toBeCloseTo(3.1);
+    const len = (i: number) => words[i]!.end - words[i]!.start;
+    expect(len(2)).toBeGreaterThan(len(0)); // "Hydration" > "Drink"
+  });
+
+  it("groups a few words at a time and highlights the one being said", () => {
+    const groups = wordGroups(wordTimings("one two three four five six", 0, 6), 4);
+    expect(groups.map((g) => g.length)).toEqual([4, 2]);
+    const at = activeWords(groups, 1.2);
+    expect(at?.group).toBe(groups[0]);
+    expect(at?.group[at.active]?.text).toBe("two");
+    expect(activeWords(groups, 5.5)?.group).toBe(groups[1]);
+    expect(activeWords(groups, 9)).toBeNull();
+  });
+});
+
+describe("voice pacing", () => {
+  it("speeds up narration a little rather than overrun the scene, never above 1.2x", () => {
+    expect(fitSpeed(4, 5)).toBe(1);
+    expect(fitSpeed(5.5, 5)).toBeCloseTo(1.1);
+    expect(fitSpeed(9, 5)).toBe(1.2);
   });
 });

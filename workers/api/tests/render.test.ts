@@ -1,4 +1,4 @@
-import { API_PATHS, FFMPEG_CORE_BASE } from "@avs/contracts";
+import { API_PATHS, FFMPEG_CORE_BASE, KOKORO_MODEL, VENDOR_FILES } from "@avs/contracts";
 import { renderManifestSchema } from "@avs/schemas";
 import { env, introspectWorkflow, SELF } from "cloudflare:test";
 import { afterEach, describe, expect, it } from "vitest";
@@ -292,7 +292,7 @@ describe("browser render API", () => {
   });
 });
 
-describe("FFmpeg core route", () => {
+describe("vendor files route", () => {
   it("serves the core from R2 publicly with long caching, and 404s otherwise", async () => {
     const missing = await SELF.fetch(`https://example.test${FFMPEG_CORE_BASE}/ffmpeg-core.wasm`);
     expect(missing.status).toBe(404);
@@ -309,5 +309,28 @@ describe("FFmpeg core route", () => {
     const escaped = await SELF.fetch(`https://example.test${FFMPEG_CORE_BASE}/../../secret`);
     expect(escaped.headers.get("content-type")).not.toBe("application/wasm");
     expect((await SELF.fetch(`https://example.test${FFMPEG_CORE_BASE}/other.js`)).status).toBe(404);
+  });
+
+  it("serves only the pinned model files, and health lists the ones still missing", async () => {
+    const model = `models/${KOKORO_MODEL}/onnx/model_quantized.onnx`;
+    const health = async () =>
+      (
+        (await (await SELF.fetch("https://example.test/api/v1/health")).json()) as {
+          data: { missing_vendor_files: string[] };
+        }
+      ).data.missing_vendor_files;
+    expect(await health()).toContain(model);
+    await env.MEDIA.put(`vendor/${model}`, new Uint8Array([8, 1]));
+    const ok = await SELF.fetch(`https://example.test/vendor/${model}`);
+    expect(ok.status).toBe(200);
+    expect(ok.headers.get("content-type")).toBe("application/octet-stream");
+    expect(await health()).not.toContain(model);
+    expect((await health()).length).toBeLessThan(VENDOR_FILES.length);
+    // A file that isn't on the pinned list is never served, even if it exists in R2.
+    await env.MEDIA.put(`vendor/models/${KOKORO_MODEL}/onnx/model.onnx`, new Uint8Array([1]));
+    expect(
+      (await SELF.fetch(`https://example.test/vendor/models/${KOKORO_MODEL}/onnx/model.onnx`))
+        .status,
+    ).toBe(404);
   });
 });

@@ -78,7 +78,7 @@ Until step 3 is done, the deployed API rejects every call except `/health` (fail
 ```bash
 pnpm build
 pnpm --filter @avs/api exec wrangler d1 migrations apply DB --remote   # reviewed migrations only
-pnpm --filter @avs/api vendor:upload                                   # once per FFmpeg version
+pnpm --filter @avs/api vendor:upload                                   # FFmpeg, ONNX, voice and depth models
 pnpm --filter @avs/api deploy                                          # runs validate-env.sh first
 ```
 

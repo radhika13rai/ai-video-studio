@@ -34,6 +34,8 @@ export const healthDataSchema = z.object({
     storage: bindingCheckSchema,
     workflows: bindingCheckSchema,
   }),
+  /** Renderer files (models, runtimes) not uploaded to R2 yet; deploys upload exactly these. */
+  missing_vendor_files: z.array(z.string()).optional(),
 });
 export type HealthData = z.infer<typeof healthDataSchema>;
 
@@ -215,6 +217,8 @@ export const renderManifestSchema = z.object({
         duration_seconds: z.number().positive(),
         visual_type: z.enum(SCENE_VISUAL_TYPES),
         caption: z.string(),
+        /** Text to speak (null for silent scenes). The browser voices it with Kokoro. */
+        narration: z.string().nullable().optional(),
         image_url: z.string().nullable(),
         voice_url: z.string().nullable(),
       }),

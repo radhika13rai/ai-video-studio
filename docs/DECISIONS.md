@@ -188,3 +188,26 @@ on one scene still makes a usable video, so it's a warning with a retry suggesti
 The deploy workflow runs only when the Cloudflare secrets exist, applies migrations in their own
 job behind a `production` environment, then deploys and health-checks. **Why:** the blueprint asks
 to keep production migrations separate, and a fresh fork shouldn't fail CI for missing secrets.
+
+## 033. Kokoro-82M narration runs in the browser (2026-11-14)
+
+The voice is Kokoro-82M (Apache-2.0), voices Heart (default) and Michael (backup), run by
+`kokoro-js` on ONNX Runtime Web during the render. **Why:** it's free and far more natural than
+MeloTTS; Workers can't run an 82M-parameter model within their CPU and memory limits; and a GitHub
+Actions runner (as with Python `kokoro-onnx`) would add minutes of latency, a stored GitHub token
+and a callback for every video. MeloTTS still runs in the workflow as the fallback.
+
+## 034. "2.5D" motion from depth, not generated video (2026-11-14)
+
+No free video-generation API exists and open models need a large GPU. A small depth model (Depth
+Anything V2 Small, 27 MB) plus a WebGL parallax shader makes still pictures move like a camera
+shot, on any phone; shots, transitions, word captions and generated music do the rest. **Why:**
+zero cost, runs on the user's device, and stays replaceable: a real video provider can be added
+later as another media capability.
+
+## 035. Renderer models and runtimes are pinned and self-hosted (2026-11-14)
+
+`VENDOR_FILES` lists every third-party renderer file with its source; downloads carry a pinned
+Hugging Face revision and sha256. The Worker serves only listed paths from R2; `/health` reports
+missing ones and the deploy uploads them. **Why:** reproducible renders, no CDN at runtime, and a
+failed or tampered download stops the deploy instead of reaching users.
