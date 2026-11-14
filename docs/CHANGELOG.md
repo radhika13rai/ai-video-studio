@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.1 (2026-11-14)
+
+- Voice and depth models run in background workers with time limits and a live seconds counter;
+  a phone that's too slow falls back to server narration or flat moves instead of freezing on
+  "Voicing scene 1". Each scene is voiced once (speed picked up front).
+
 ## 1.1.0 (2026-11-14)
 
 - Free motion: depth-based 3D camera moves (Depth Anything V2 Small + WebGL), shots with punch-ins
