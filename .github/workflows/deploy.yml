@@ -73,8 +73,13 @@ jobs:
         id: deploy
         working-directory: workers/api
         run: |
+          set -o pipefail
           pnpm exec wrangler deploy | tee "$RUNNER_TEMP/deploy.log"
-          url=$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' "$RUNNER_TEMP/deploy.log" | head -1)
+          # A custom domain prints as "studio.example.com (custom domain)"; workers.dev prints a URL.
+          host=$(grep -oE '[a-zA-Z0-9.-]+ \(custom domain\)' "$RUNNER_TEMP/deploy.log" | head -1 | cut -d' ' -f1)
+          if [ -n "$host" ]; then url="https://$host"; else
+            url=$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' "$RUNNER_TEMP/deploy.log" | head -1); fi
+          if [ -z "$url" ]; then echo "::error::Could not find the deployed URL in wrangler's output."; exit 1; fi
           echo "url=$url" >> "$GITHUB_OUTPUT"
       - name: Upload FFmpeg core if missing
         working-directory: workers/api
