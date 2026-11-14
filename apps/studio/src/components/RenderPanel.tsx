@@ -2,7 +2,14 @@ import type { Asset, Project } from "@avs/contracts";
 import { KOKORO_VOICES, MAX_RENDER_BYTES, type KokoroVoiceId } from "@avs/contracts";
 import type { RenderProgress, RenderStage } from "@avs/renderer";
 import { useEffect, useRef, useState } from "react";
-import { abortRender, assetUrl, completeRender, startRender, uploadRender } from "../services/api";
+import {
+  abortRender,
+  ApiClientError,
+  assetUrl,
+  completeRender,
+  startRender,
+  uploadRender,
+} from "../services/api";
 import { ErrorBox } from "./Feedback";
 
 const STAGES: { key: RenderStage | "upload" | "finish"; label: string }[] = [
@@ -18,7 +25,7 @@ type Stage = (typeof STAGES)[number]["key"];
 type State =
   | { kind: "idle" }
   | { kind: "running"; stage: Stage; progress: number; detail?: string }
-  | { kind: "error"; message: string }
+  | { kind: "error"; message: string; conflict?: boolean }
   | { kind: "done" };
 
 /**
@@ -60,14 +67,14 @@ export function RenderPanel({
     [running, state.kind, onBusyChange],
   );
 
-  async function run() {
+  async function run(takeover = false) {
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     setState({ kind: "running", stage: "loading", progress: 0 });
     const work = async () => {
       let manifest;
       try {
-        manifest = await startRender(project.id);
+        manifest = await startRender(project.id, takeover);
         const { renderVideo } = await import("@avs/renderer"); // loaded only when needed
         const result = await renderVideo(manifest, {
           quality,
@@ -95,6 +102,7 @@ export function RenderPanel({
         const asset: Asset = await uploadRender(
           project.id,
           manifest.render_request_id,
+          manifest.render_attempt_token,
           result.mp4,
           {
             durationSeconds: result.durationSeconds,
@@ -102,16 +110,28 @@ export function RenderPanel({
           },
         );
         setState({ kind: "running", stage: "finish", progress: 0.5 });
-        await completeRender(project.id, manifest.render_request_id, asset.id);
+        await completeRender(
+          project.id,
+          manifest.render_request_id,
+          manifest.render_attempt_token,
+          asset.id,
+        );
         setState({ kind: "done" });
         onFinished();
       } catch (err) {
         const cancelled = err instanceof DOMException && err.name === "AbortError";
-        await abortRender(project.id).catch(() => undefined);
+        // Hand the project back only if this tab holds it (it has a token once started).
+        if (manifest)
+          await abortRender(project.id, manifest.render_attempt_token).catch(() => undefined);
+        const conflict = err instanceof ApiClientError && err.code === "CONFLICT" && !manifest;
         setState(
           cancelled
             ? { kind: "idle" }
-            : { kind: "error", message: err instanceof Error ? err.message : "Rendering failed." },
+            : {
+                kind: "error",
+                message: err instanceof Error ? err.message : "Rendering failed.",
+                ...(conflict ? { conflict: true } : {}),
+              },
         );
       } finally {
         abortRef.current = null;
@@ -139,7 +159,17 @@ export function RenderPanel({
 
   return (
     <div className="render-panel" aria-live="polite">
-      {state.kind === "error" && <ErrorBox message={state.message} onRetry={() => void run()} />}
+      {state.kind === "error" &&
+        (state.conflict ? (
+          <div className="alert error" role="alert">
+            <span>{state.message}</span>
+            <button type="button" className="btn small" onClick={() => void run(true)}>
+              Start anyway
+            </button>
+          </div>
+        ) : (
+          <ErrorBox message={state.message} onRetry={() => void run()} />
+        ))}
       {running ? (
         <>
           <div

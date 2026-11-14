@@ -33,9 +33,14 @@ To set it up (free for up to 50 users; check Cloudflare's current terms):
 Every project query checks ownership inside the SQL (see `DATABASE.md`). Another user's project
 answers 404.
 
+Within a project, only the browser render holding the current attempt token (from
+`POST /render`) can upload, complete or abort it; anything else gets 409 and changes nothing.
+
 ## Input and output
 
 - Bodies must be `application/json`, at most 64 KB, and pass Zod validation before any database work.
+  The one exception is the render upload: raw `video/mp4` with a required `Content-Length` (at most
+  95 MB), streamed to R2 and validated there (structure, video track) before it's recorded.
 - Errors use the shared envelope and never include stack traces or SQL.
 - API responses send `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`.
 

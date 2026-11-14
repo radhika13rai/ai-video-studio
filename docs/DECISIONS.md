@@ -220,3 +220,14 @@ the renderer reports it planned, when plausible, and treats extra length versus 
 warning. **Why:** scenes are deliberately stretched to fit the narration, so the brief is no
 longer the right yardstick, and a failed render shouldn't force regenerating the script, images
 and voice (time and free AI quota). Attempt 1 keeps its step names so in-flight runs resume.
+
+## 037. Render attempt tokens with a lease; streamed, validate-then-replace uploads (2026-11-14)
+
+`POST /render` claims the project with a random attempt token in one conditional D1 update
+(30-minute lease, explicit takeover). Upload, complete and abort require that token. Uploads
+stream into R2 with `FixedLengthStream`, get a fresh object name, are validated with ranged reads,
+and replace the old video only after the new asset row exists. `mergeProductionConfig` now uses
+`json_set` per key, so concurrent writers to different keys can't overwrite each other.
+**Why:** two tabs or devices could break each other's renders, a stale tab could cancel a live
+one, a 95 MB body could exhaust Worker memory, and a failed upload could lose the previous video.
+No migration: the token lives in the existing `production_config` JSON.

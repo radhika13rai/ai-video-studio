@@ -60,6 +60,28 @@ project is planning, generating, awaiting or in render or quality check; it mark
 cancelled, terminates the workflow instance and cancels open jobs. Progress is read from
 `/jobs`, `/scenes` and `/run`; the dashboard polls every 3 seconds while production is active.
 
+### Render (browser)
+
+| Method | Path                                              | Body / headers                                                            | Returns                                 |
+| ------ | ------------------------------------------------- | ------------------------------------------------------------------------- | --------------------------------------- |
+| POST   | `/projects/:id/render[?takeover=1]`               | –                                                                         | Manifest incl. `render_attempt_token`   |
+| POST   | `/projects/:id/render/upload?render_request_id=…` | raw `video/mp4`, `Content-Length`, `x-render-attempt`, `x-video-duration` | 201 render asset                        |
+| POST   | `/projects/:id/render/complete`                   | `{ render_request_id, asset_id }`, `x-render-attempt`                     | 202 `{ status: "quality_check" }`       |
+| POST   | `/projects/:id/render/abort`                      | `x-render-attempt`                                                        | The project (back to `awaiting_render`) |
+
+- **One render at a time.** Starting a render claims the project atomically with a new attempt
+  token, held for 30 minutes (`RENDER_LEASE_MINUTES`). A second start meanwhile gets 409
+  `CONFLICT` ("already rendering in another tab or device"); `?takeover=1` replaces the holder.
+  An expired lease needs no takeover.
+- **Token required.** Upload, complete and abort must send the holder's token in
+  `x-render-attempt`; a missing or replaced token gets 409 `CONFLICT` and changes nothing.
+  Complete and abort release the token.
+- **Upload.** `Content-Length` is required (411 without it; 413 over 95 MB, before reading). The
+  body streams into R2 under a fresh name; a body shorter or longer than declared is rejected.
+  The stored file is then checked with ranged reads (size, `ftyp`, MP4 structure, a video track);
+  a bad file is deleted and the previous video stays. Only after the new asset is recorded are
+  older render files removed.
+
 ### Create a project
 
 ```http

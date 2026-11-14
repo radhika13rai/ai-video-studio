@@ -1,4 +1,4 @@
-import { API_PATHS } from "@avs/contracts";
+import { API_PATHS, RENDER_ATTEMPT_HEADER } from "@avs/contracts";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -10,6 +10,7 @@ vi.mock("@avs/renderer", () => ({ renderVideo: (...args: unknown[]) => renderVid
 
 const manifest = (projectId: string) => ({
   render_request_id: "rr-1",
+  render_attempt_token: "tok-1",
   project: { id: projectId, title: "T", aspect_ratio: "9:16", duration_seconds: 10 },
   scenes: [
     {
@@ -81,6 +82,11 @@ describe("RenderPanel", () => {
       render_request_id: "rr-1",
       asset_id: "video-1",
     });
+    // Every call after the start carries this render's attempt token.
+    const tokenOf = (c?: { init: RequestInit }) =>
+      (c?.init.headers as Record<string, string> | undefined)?.[RENDER_ATTEMPT_HEADER];
+    expect(tokenOf(upload)).toBe("tok-1");
+    expect(tokenOf(complete)).toBe("tok-1");
     expect(screen.getByText(/Uploaded/)).toBeTruthy();
   });
 
@@ -114,6 +120,36 @@ describe("RenderPanel", () => {
     await userEvent.click(screen.getByRole("button", { name: "Render video" }));
     expect(await screen.findByText(/isn't ready to render/)).toBeTruthy();
     expect(renderVideo).not.toHaveBeenCalled();
+  });
+
+  it("offers to take over when another tab or device is rendering", async () => {
+    const p = makeProject({ status: "rendering" });
+    let starts = 0;
+    const calls = stubApi(
+      route("POST", /\/render(\?takeover=1)?$/, () => {
+        starts++;
+        return starts === 1
+          ? err("CONFLICT", "This video is already rendering in another tab or device.", 409)
+          : ok(manifest(p.id));
+      }),
+      route("POST", API_PATHS.projectRenderAbort(p.id), () => ok(p)),
+    );
+    renderVideo.mockRejectedValue(new Error("stop here"));
+    render(<RenderPanel project={p} onFinished={vi.fn()} />);
+    await userEvent.click(screen.getByRole("button", { name: "Render video" }));
+    expect(await screen.findByText(/already rendering/)).toBeTruthy();
+    // A conflict at start never aborts the other render.
+    expect(calls.some((c) => c.url.pathname.endsWith("/render/abort"))).toBe(false);
+    await userEvent.click(screen.getByRole("button", { name: "Start anyway" }));
+    await waitFor(() => expect(renderVideo).toHaveBeenCalled());
+    const second = calls.filter((c) => c.url.pathname.endsWith("/render"))[1];
+    expect(second?.url.searchParams.get("takeover")).toBe("1");
+    // This tab now holds the render, so its failure hands it back with its own token.
+    await waitFor(() =>
+      expect(
+        calls.find((c) => c.url.pathname.endsWith("/render/abort"))?.init.headers,
+      ).toMatchObject({ [RENDER_ATTEMPT_HEADER]: "tok-1" }),
+    );
   });
 
   it("explains a retry after a failed quality check, and stays quiet on the first attempt", () => {

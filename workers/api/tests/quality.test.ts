@@ -1,4 +1,4 @@
-import { API_PATHS } from "@avs/contracts";
+import { API_PATHS, RENDER_ATTEMPT_HEADER } from "@avs/contracts";
 import { env, introspectWorkflow, SELF } from "cloudflare:test";
 import { afterEach, describe, expect, it } from "vitest";
 import { setTextModelOverride } from "../src/ai/factory";
@@ -222,11 +222,24 @@ describe("quality checks", () => {
 // --- Workflow-level: QC report after render, and retrying a single scene ---------------------
 
 const EMAIL = "qc@example.com";
-const call = (path: string, init: RequestInit = {}, user = EMAIL) =>
-  SELF.fetch(`https://example.test${path}`, {
+// Like the browser, remember the attempt token from the last render start and send it on
+// upload/complete/abort. A test can override it by passing the header itself.
+let attemptToken = "";
+const call = async (path: string, init: RequestInit = {}, user = EMAIL) => {
+  const res = await SELF.fetch(`https://example.test${path}`, {
     ...init,
-    headers: { "x-dev-user": user, ...(init.headers as Record<string, string> | undefined) },
+    headers: {
+      "x-dev-user": user,
+      ...(attemptToken ? { [RENDER_ATTEMPT_HEADER]: attemptToken } : {}),
+      ...(init.headers as Record<string, string> | undefined),
+    },
   });
+  if (init.method === "POST" && /\/render(\?|$)/.test(path) && res.ok) {
+    const body = (await res.clone().json()) as { data?: { render_attempt_token?: string } };
+    attemptToken = body.data?.render_attempt_token ?? attemptToken;
+  }
+  return res;
+};
 const jpeg = () =>
   new Uint8Array([
     0xff, 0xd8, 0xff, 0xe0, 0, 4, 0, 0, 0xff, 0xc0, 0, 11, 8, 4, 0, 4, 0, 3, 0, 0, 0, 0xff, 0xd9,

@@ -108,13 +108,17 @@ a copy of the ONNX `.wasm` into the build; it's unused (the runtime is pointed a
 
 ## Safety and limits
 
-- One render per browser (Web Locks). The tab warns before closing during a render. Stop and
-  failures call `/render/abort`, which returns the project to "Ready to render".
+- One render per project: the server hands out an attempt token with a 30-minute lease, and
+  upload, complete and abort require it (see `API.md`). A second tab or device sees "already
+  rendering" with a **Start anyway** button (takeover). Web Locks still stop two renders in one
+  browser. The tab warns before closing during a render. Stop and failures call `/render/abort`
+  with the token, which returns the project to "Ready to render".
 - Missing or undecodable media never stops a render: that scene renders without it, and the
   result lists `missingMedia`.
 - The server accepts the upload only while the project is `rendering`, for the current render
-  request, as `video/mp4` whose bytes start with an `ftyp` box, up to 95 MB. A new upload replaces
-  the previous video. `/complete` checks ownership, the request ID and that the asset is this
+  request and attempt token, as `video/mp4` with a `Content-Length` up to 95 MB. It streams into R2
+  (never buffered in the Worker), is validated there, and replaces the previous video only after
+  it's recorded; a damaged upload is deleted and the old video stays. `/complete` checks ownership, the request ID and that the asset is this
   render's video before resuming the workflow; the workflow checks the asset again.
 
 ## Testing

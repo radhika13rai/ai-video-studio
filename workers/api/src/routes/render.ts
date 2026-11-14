@@ -1,21 +1,31 @@
-import { API_PATHS, API_PREFIX, MAX_RENDER_BYTES, VENDOR_FILES } from "@avs/contracts";
+import {
+  API_PATHS,
+  API_PREFIX,
+  MAX_RENDER_BYTES,
+  RENDER_ATTEMPT_HEADER,
+  RENDER_LEASE_MINUTES,
+  VENDOR_FILES,
+} from "@avs/contracts";
 import { renderCompleteRequestSchema, type RenderManifest } from "@avs/schemas";
 import {
+  claimRenderAttempt,
   createAsset,
   deleteAsset,
   getAsset,
   getLatestWorkflowRun,
   listAssets,
   listScenes,
+  releaseRenderAttempt,
+  renderAttemptOf,
   requireProject,
-  setProjectStatusIf,
+  type Project,
 } from "../db";
 import type { Env } from "../env";
 import { ApiError } from "../lib/errors";
 import { jsonOk } from "../lib/http";
 import { readJson } from "../lib/request";
 import type { Router } from "../lib/router";
-import { bytesReader, inspectMp4 } from "../quality/mp4";
+import { inspectMp4, r2Reader } from "../quality/mp4";
 import { RENDER_EVENT } from "../workflows/production-workflow";
 import type { Ctx } from "./projects";
 
@@ -27,11 +37,28 @@ function renderRequestOf(config: Record<string, unknown>): string | null {
     : null;
 }
 
+const LEASE_MS = RENDER_LEASE_MINUTES * 60_000;
+
+/** The caller's attempt token must be the one holding the project, or the request is stale. */
+function requireAttempt(project: Project, request: Request): string {
+  const token = request.headers.get(RENDER_ATTEMPT_HEADER) ?? "";
+  const held = renderAttemptOf(project.production_config);
+  if (!token || !held || held.token !== token)
+    throw new ApiError(
+      409,
+      "CONFLICT",
+      "This render was replaced by another render of this project (another tab or device). Reload the page.",
+    );
+  return token;
+}
+
+const BAD_UPLOAD = (why: string) => new ApiError(400, "VALIDATION_ERROR", why);
+
 export function registerRenderRoutes(router: Router<Ctx>): void {
   const base = `${API_PREFIX}/projects/:id/render`;
 
   /** Starts (or resumes) a browser render: moves the project to "rendering" and returns the manifest. */
-  router.on("POST", base, async ({ db, user }, p) => {
+  router.on("POST", base, async ({ db, user, url: reqUrl }, p) => {
     const projectId = p.id ?? "";
     const project = await requireProject(db, user.id, projectId);
     const requestId = renderRequestOf(project.production_config);
@@ -41,7 +68,23 @@ export function registerRenderRoutes(router: Router<Ctx>): void {
         "INVALID_STATE",
         `This project isn't ready to render (status: ${project.status}).`,
       );
-    await setProjectStatusIf(db, user.id, projectId, ["awaiting_render"], "rendering");
+    // One render at a time: claim the project atomically for this attempt.
+    const attempt = { token: crypto.randomUUID(), started_at: new Date().toISOString() };
+    const takeover = reqUrl.searchParams.get("takeover") === "1";
+    const staleBefore = new Date(Date.now() - LEASE_MS).toISOString();
+    if (!(await claimRenderAttempt(db, user.id, projectId, attempt, staleBefore, takeover))) {
+      const held = renderAttemptOf(
+        (await requireProject(db, user.id, projectId)).production_config,
+      );
+      const mins = held
+        ? Math.max(1, Math.round((Date.now() - Date.parse(held.started_at)) / 60_000))
+        : null;
+      throw new ApiError(
+        409,
+        "CONFLICT",
+        `This video is already rendering in another tab or device${mins ? ` (started ${mins} min ago)` : ""}. Wait for it, or start anyway to replace it.`,
+      );
+    }
 
     const run = await getLatestWorkflowRun(db, user.id, projectId);
     const runPrefix = run ? `projects/${projectId}/runs/${run.id}/` : null;
@@ -73,6 +116,7 @@ export function registerRenderRoutes(router: Router<Ctx>): void {
       : [];
     const manifest: RenderManifest = {
       render_request_id: requestId,
+      render_attempt_token: attempt.token,
       project: {
         id: project.id,
         title: project.title,
@@ -85,7 +129,10 @@ export function registerRenderRoutes(router: Router<Ctx>): void {
     return jsonOk(manifest);
   });
 
-  /** Receives the finished MP4 (raw body) and stores it in R2 as the project's render asset. */
+  /**
+   * Receives the finished MP4 (raw body) and streams it into R2, then validates it there and
+   * only then replaces the project's previous video.
+   */
   router.on("POST", `${base}/upload`, async ({ request, url, env, db, user }, p) => {
     const projectId = p.id ?? "";
     const project = await requireProject(db, user.id, projectId);
@@ -98,9 +145,13 @@ export function registerRenderRoutes(router: Router<Ctx>): void {
         "INVALID_STATE",
         "This upload is for an old render request. Reload the page.",
       );
+    const token = requireAttempt(project, request);
     if (!/^video\/mp4\b/i.test(request.headers.get("content-type") ?? ""))
       throw new ApiError(415, "UNSUPPORTED_MEDIA_TYPE", "Upload the video as video/mp4.");
-    const declared = Number(request.headers.get("content-length") ?? "0");
+    const lengthHeader = request.headers.get("content-length");
+    const declared = Number(lengthHeader);
+    if (!lengthHeader || !Number.isInteger(declared) || declared <= 0)
+      throw new ApiError(411, "VALIDATION_ERROR", "The upload needs a Content-Length header.");
     if (declared > MAX_RENDER_BYTES)
       throw new ApiError(
         413,
@@ -109,49 +160,62 @@ export function registerRenderRoutes(router: Router<Ctx>): void {
       );
     if (!env.MEDIA)
       throw new ApiError(503, "INTERNAL_ERROR", "Media storage is not configured.", true);
+    if (!request.body) throw BAD_UPLOAD("The upload is empty.");
+    const media = env.MEDIA;
 
-    const bytes = new Uint8Array(await request.arrayBuffer());
-    if (bytes.byteLength > MAX_RENDER_BYTES)
-      throw new ApiError(
-        413,
-        "PAYLOAD_TOO_LARGE",
-        `The video must be at most ${Math.round(MAX_RENDER_BYTES / 1048576)} MB.`,
-      );
-    // An MP4 starts with an `ftyp` box and must contain a readable video track.
-    if (bytes.byteLength < 12 || String.fromCharCode(...bytes.subarray(4, 8)) !== "ftyp")
-      throw new ApiError(400, "VALIDATION_ERROR", "The upload isn't an MP4 file.");
+    // Stream straight to R2 (never held in Worker memory). FixedLengthStream rejects a body
+    // shorter or longer than declared, so nothing incomplete is stored.
+    const run = await getLatestWorkflowRun(db, user.id, projectId);
+    // A fresh name per upload: a failed retry can never overwrite (then delete) a good video.
+    const storage_key = `projects/${projectId}/runs/${run?.id ?? "manual"}/final-${crypto.randomUUID().slice(0, 8)}.mp4`;
+    try {
+      await media.put(storage_key, request.body.pipeThrough(new FixedLengthStream(declared)), {
+        httpMetadata: { contentType: "video/mp4" },
+      });
+    } catch {
+      await media.delete(storage_key).catch(() => undefined);
+      throw BAD_UPLOAD("The upload was incomplete. Render the video again.");
+    }
+
+    // Validate what was stored, with ranged reads. Anything wrong: remove it, keep the old video.
     let info;
     try {
-      info = await inspectMp4(bytesReader(bytes), bytes.byteLength);
+      const head = await media.head(storage_key);
+      if (!head || head.size !== declared) throw new Error("the stored size doesn't match");
+      const start = await media.get(storage_key, { range: { offset: 4, length: 4 } });
+      const brand = start ? new TextDecoder().decode(await start.arrayBuffer()) : "";
+      if (brand !== "ftyp") throw new Error("not an MP4 file");
+      info = await inspectMp4(r2Reader(media, storage_key), head.size);
+      if (!info.tracks.some((t) => t.kind === "video")) throw new Error("it has no video track");
     } catch (err) {
-      throw new ApiError(
-        400,
-        "VALIDATION_ERROR",
-        `The MP4 is damaged: ${err instanceof Error ? err.message : "unreadable"}.`,
+      await media.delete(storage_key);
+      const why = err instanceof Error ? err.message : "unreadable";
+      throw BAD_UPLOAD(
+        why === "not an MP4 file"
+          ? "The upload isn't an MP4 file."
+          : why === "it has no video track"
+            ? "The MP4 has no video track."
+            : `The MP4 is damaged: ${why}.`,
       );
     }
-    if (!info.tracks.some((t) => t.kind === "video"))
-      throw new ApiError(400, "VALIDATION_ERROR", "The MP4 has no video track.");
 
-    const run = await getLatestWorkflowRun(db, user.id, projectId);
-    const storage_key = `projects/${projectId}/runs/${run?.id ?? "manual"}/final-${requestId.slice(0, 8)}.mp4`;
-    for (const old of (await listAssets(db, user.id, projectId)).filter(
-      (a) => a.asset_type === "render",
-    )) {
-      const { storage_key: key } = await deleteAsset(db, user.id, old.id);
-      await env.MEDIA.delete(key);
+    // The attempt may have been replaced while the bytes were uploading.
+    const now = await requireProject(db, user.id, projectId);
+    if (renderAttemptOf(now.production_config)?.token !== token) {
+      await media.delete(storage_key);
+      requireAttempt(now, request); // throws the stale-attempt error
     }
-    await env.MEDIA.put(storage_key, bytes, { httpMetadata: { contentType: "video/mp4" } });
     const durationHeader = Number(request.headers.get("x-video-duration") ?? "");
     const asset = await createAsset(db, user.id, projectId, {
       asset_type: "render",
       storage_key,
       mime_type: "video/mp4",
-      file_size: bytes.byteLength,
+      file_size: declared,
       source_provider: "browser-renderer",
       license: { source: "rendered" },
       metadata: {
         render_request_id: requestId,
+        render_attempt: token,
         duration_seconds: Math.round(info.durationSeconds * 1000) / 1000,
         ...(Number.isFinite(durationHeader) && durationHeader > 0
           ? { reported_duration_seconds: durationHeader }
@@ -159,6 +223,17 @@ export function registerRenderRoutes(router: Router<Ctx>): void {
         encoder: (request.headers.get("x-video-encoder") ?? "").slice(0, 20),
       },
     });
+    // Only now that the new video is safe, remove the previous one(s).
+    for (const old of (await listAssets(db, user.id, projectId)).filter(
+      (a) => a.asset_type === "render" && a.id !== asset.id,
+    )) {
+      try {
+        const { storage_key: key } = await deleteAsset(db, user.id, old.id);
+        await media.delete(key);
+      } catch (err) {
+        console.warn("Old render cleanup failed", err instanceof Error ? err.message : err);
+      }
+    }
     return jsonOk(asset, 201);
   });
 
@@ -170,12 +245,14 @@ export function registerRenderRoutes(router: Router<Ctx>): void {
     const requestId = renderRequestOf(project.production_config);
     if (project.status !== "rendering" || body.render_request_id !== requestId)
       throw new ApiError(409, "INVALID_STATE", "This render request isn't active.");
+    const token = requireAttempt(project, request);
     const asset = await getAsset(db, user.id, body.asset_id);
     if (
       !asset ||
       asset.project_id !== projectId ||
       asset.asset_type !== "render" ||
-      asset.metadata.render_request_id !== requestId
+      asset.metadata.render_request_id !== requestId ||
+      asset.metadata.render_attempt !== token
     )
       throw new ApiError(400, "VALIDATION_ERROR", "That asset isn't this render's video.");
     const run = await getLatestWorkflowRun(db, user.id, projectId);
@@ -199,14 +276,18 @@ export function registerRenderRoutes(router: Router<Ctx>): void {
         "The production run is no longer waiting. Generate again.",
       );
     }
+    await releaseRenderAttempt(db, user.id, projectId, token);
     return jsonOk({ project_id: projectId, status: "quality_check" }, 202);
   });
 
-  /** The browser gave up (error or cancel): allow another attempt. */
-  router.on("POST", `${base}/abort`, async ({ db, user }, p) => {
+  /** The browser gave up (error or cancel): allow another attempt. Requires its token. */
+  router.on("POST", `${base}/abort`, async ({ request, db, user }, p) => {
     const projectId = p.id ?? "";
-    await requireProject(db, user.id, projectId);
-    await setProjectStatusIf(db, user.id, projectId, ["rendering"], "awaiting_render");
+    const project = await requireProject(db, user.id, projectId);
+    const token = requireAttempt(project, request);
+    // Only the render holding the project can hand it back; a stale tab changes nothing.
+    if (!(await releaseRenderAttempt(db, user.id, projectId, token, "awaiting_render")))
+      requireAttempt(await requireProject(db, user.id, projectId), request);
     return jsonOk(await requireProject(db, user.id, projectId));
   });
 }

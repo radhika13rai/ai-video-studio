@@ -14,7 +14,7 @@ import type {
   UpdateProjectRequest,
   User,
 } from "@avs/contracts";
-import { API_PATHS, IDEMPOTENCY_HEADER } from "@avs/contracts";
+import { API_PATHS, IDEMPOTENCY_HEADER, RENDER_ATTEMPT_HEADER } from "@avs/contracts";
 import type { ProjectStatus } from "@avs/types";
 import {
   assetSchema,
@@ -138,20 +138,33 @@ export const listProviders = (): Promise<ProviderStatus[]> =>
   request(API_PATHS.providers, z.array(providerStatusSchema));
 export const assetUrl = (projectId: string, assetId: string) =>
   `${BASE_URL}${API_PATHS.assetContent(projectId, assetId)}`;
-export const startRender = (id: string): Promise<RenderManifest> =>
-  request(API_PATHS.projectRender(id), renderManifestSchema, { method: "POST" });
-export const completeRender = (id: string, renderRequestId: string, assetId: string) =>
+/** Starts a render; `takeover` replaces a render that's running in another tab or device. */
+export const startRender = (id: string, takeover = false): Promise<RenderManifest> =>
+  request(`${API_PATHS.projectRender(id)}${takeover ? "?takeover=1" : ""}`, renderManifestSchema, {
+    method: "POST",
+  });
+export const completeRender = (
+  id: string,
+  renderRequestId: string,
+  attemptToken: string,
+  assetId: string,
+) =>
   request(API_PATHS.projectRenderComplete(id), z.object({ status: z.string() }), {
     method: "POST",
     body: { render_request_id: renderRequestId, asset_id: assetId },
+    headers: { [RENDER_ATTEMPT_HEADER]: attemptToken },
   });
-export const abortRender = (id: string) =>
-  request(API_PATHS.projectRenderAbort(id), projectSchema, { method: "POST" });
+export const abortRender = (id: string, attemptToken: string) =>
+  request(API_PATHS.projectRenderAbort(id), projectSchema, {
+    method: "POST",
+    headers: { [RENDER_ATTEMPT_HEADER]: attemptToken },
+  });
 
 /** Uploads the finished MP4 as the raw request body (no multipart, no base64). */
 export async function uploadRender(
   id: string,
   renderRequestId: string,
+  attemptToken: string,
   mp4: Uint8Array,
   info: { durationSeconds: number; encoder: string },
 ): Promise<Asset> {
@@ -159,6 +172,7 @@ export async function uploadRender(
     method: "POST",
     headers: {
       "content-type": "video/mp4",
+      [RENDER_ATTEMPT_HEADER]: attemptToken,
       "x-video-duration": String(info.durationSeconds),
       "x-video-encoder": info.encoder,
     },
