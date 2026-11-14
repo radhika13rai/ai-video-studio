@@ -203,6 +203,8 @@ export type ProviderStatus = z.infer<typeof providerStatusSchema>;
 /** POST /api/v1/projects/:id/render: everything the browser needs to render the video. */
 export const renderManifestSchema = z.object({
   render_request_id: z.string(),
+  /** This browser render's token; send it as the x-render-attempt header on upload/complete/abort. */
+  render_attempt_token: z.string().min(1),
   project: z.object({
     id: z.string(),
     title: z.string(),

@@ -1,4 +1,11 @@
-import { API_PATHS, FFMPEG_CORE_BASE, KOKORO_MODEL, VENDOR_FILES } from "@avs/contracts";
+import {
+  API_PATHS,
+  RENDER_ATTEMPT_HEADER,
+  RENDER_LEASE_MINUTES,
+  FFMPEG_CORE_BASE,
+  KOKORO_MODEL,
+  VENDOR_FILES,
+} from "@avs/contracts";
 import { renderManifestSchema } from "@avs/schemas";
 import { env, introspectWorkflow, SELF } from "cloudflare:test";
 import { afterEach, describe, expect, it } from "vitest";
@@ -9,11 +16,24 @@ import { setMediaProvidersOverride } from "../src/providers/registry";
 import type { MediaProvider } from "../src/providers/types";
 
 const EMAIL = "renderer@example.com";
-const call = (path: string, init: RequestInit = {}, user = EMAIL) =>
-  SELF.fetch(`https://example.test${path}`, {
+// Like the browser, remember the attempt token from the last render start and send it on
+// upload/complete/abort. A test can override it by passing the header itself.
+let attemptToken = "";
+const call = async (path: string, init: RequestInit = {}, user = EMAIL) => {
+  const res = await SELF.fetch(`https://example.test${path}`, {
     ...init,
-    headers: { "x-dev-user": user, ...(init.headers as Record<string, string> | undefined) },
+    headers: {
+      "x-dev-user": user,
+      ...(attemptToken ? { [RENDER_ATTEMPT_HEADER]: attemptToken } : {}),
+      ...(init.headers as Record<string, string> | undefined),
+    },
   });
+  if (init.method === "POST" && /\/render(\?|$)/.test(path) && res.ok) {
+    const body = (await res.clone().json()) as { data?: { render_attempt_token?: string } };
+    attemptToken = body.data?.render_attempt_token ?? attemptToken;
+  }
+  return res;
+};
 const json = (body: unknown) => ({
   method: "POST",
   body: JSON.stringify(body),
@@ -344,6 +364,182 @@ describe("browser render API", () => {
     const id = ((await created.json()) as { data: { id: string } }).data.id;
     expect((await call(API_PATHS.projectRender(id), { method: "POST" })).status).toBe(409);
   });
+});
+
+describe("render attempts (one render at a time)", () => {
+  const start = async (projectId: string, takeover = false) => {
+    const res = await call(
+      `${API_PATHS.projectRender(projectId)}${takeover ? "?takeover=1" : ""}`,
+      { method: "POST" },
+    );
+    const body = (await res.json()) as {
+      data?: { render_request_id: string; render_attempt_token: string };
+      error?: { code: string; message: string };
+    };
+    return { status: res.status, ...body };
+  };
+  const upload = (projectId: string, requestId: string, token: string, body: Uint8Array) =>
+    call(API_PATHS.projectRenderUpload(projectId, requestId), {
+      method: "POST",
+      body,
+      headers: { "content-type": "video/mp4", [RENDER_ATTEMPT_HEADER]: token },
+    });
+  const statusOf = async (projectId: string) =>
+    (await requireProject(env.DB, (await upsertUserByEmail(env.DB, EMAIL)).id, projectId)).status;
+
+  it("refuses a second render while one is running, unless it takes over", async () => {
+    const { projectId, introspector } = await readyProject();
+    try {
+      const a = await start(projectId);
+      expect(a.status).toBe(200);
+      const b = await start(projectId);
+      expect(b.status).toBe(409);
+      expect(b.error).toMatchObject({
+        code: "CONFLICT",
+        message: expect.stringMatching(/already rendering/),
+      });
+
+      const c = await start(projectId, true);
+      expect(c.status).toBe(200);
+      expect(c.data!.render_attempt_token).not.toBe(a.data!.render_attempt_token);
+
+      // The replaced attempt can no longer upload, complete or abort.
+      const oldToken = a.data!.render_attempt_token;
+      expect((await upload(projectId, a.data!.render_request_id, oldToken, mp4())).status).toBe(
+        409,
+      );
+      const staleAbort = await call(API_PATHS.projectRenderAbort(projectId), {
+        method: "POST",
+        headers: { [RENDER_ATTEMPT_HEADER]: oldToken },
+      });
+      expect(staleAbort.status).toBe(409);
+      expect(await statusOf(projectId)).toBe("rendering"); // the live render is untouched
+      const staleComplete = await call(API_PATHS.projectRenderComplete(projectId), {
+        ...json({ render_request_id: a.data!.render_request_id, asset_id: "x" }),
+        headers: { "content-type": "application/json", [RENDER_ATTEMPT_HEADER]: oldToken },
+      });
+      expect(staleComplete.status).toBe(409);
+      // No token at all is refused too.
+      const noToken = await SELF.fetch(
+        `https://example.test${API_PATHS.projectRenderAbort(projectId)}`,
+        { method: "POST", headers: { "x-dev-user": EMAIL } },
+      );
+      expect(noToken.status).toBe(409);
+
+      // The current attempt aborts cleanly; then a fresh start needs no takeover.
+      const abort = await call(API_PATHS.projectRenderAbort(projectId), {
+        method: "POST",
+        headers: { [RENDER_ATTEMPT_HEADER]: c.data!.render_attempt_token },
+      });
+      expect(abort.status).toBe(200);
+      expect(await statusOf(projectId)).toBe("awaiting_render");
+      expect((await start(projectId)).status).toBe(200);
+    } finally {
+      await introspector.dispose();
+    }
+  }, 30_000);
+
+  it("lets exactly one of two simultaneous starts win", async () => {
+    const { projectId, introspector } = await readyProject();
+    try {
+      const results = await Promise.all([start(projectId), start(projectId)]);
+      expect(results.map((r) => r.status).sort()).toEqual([200, 409]);
+    } finally {
+      await introspector.dispose();
+    }
+  }, 30_000);
+
+  it("lets a new render start once the old one's lease has expired", async () => {
+    const { projectId, introspector } = await readyProject();
+    try {
+      const a = await start(projectId);
+      expect(a.status).toBe(200);
+      const old = new Date(Date.now() - (RENDER_LEASE_MINUTES + 1) * 60_000).toISOString();
+      await env.DB.prepare(
+        "UPDATE projects SET production_config = json_set(production_config, '$.render_attempt.started_at', ?) WHERE id = ?",
+      )
+        .bind(old, projectId)
+        .run();
+      expect((await start(projectId)).status).toBe(200);
+    } finally {
+      await introspector.dispose();
+    }
+  }, 30_000);
+
+  it("keeps the previous video when a new upload is damaged, and deletes the damaged file", async () => {
+    const { projectId, introspector } = await readyProject();
+    try {
+      const a = await start(projectId);
+      const ok = await upload(
+        projectId,
+        a.data!.render_request_id,
+        a.data!.render_attempt_token,
+        mp4(),
+      );
+      expect(ok.status).toBe(201);
+      const first = ((await ok.json()) as { data: { id: string; storage_key: string } }).data;
+
+      const broken = mp4().subarray(0, 4000); // starts like an MP4, but cut short
+      const bad = await upload(
+        projectId,
+        a.data!.render_request_id,
+        a.data!.render_attempt_token,
+        broken,
+      );
+      expect(bad.status).toBe(400);
+      const user = await upsertUserByEmail(env.DB, EMAIL);
+      const renders = (await listAssets(env.DB, user.id, projectId)).filter(
+        (x) => x.asset_type === "render",
+      );
+      expect(renders.map((r) => r.id)).toEqual([first.id]);
+      expect(await env.MEDIA.head(first.storage_key)).not.toBeNull();
+      const listed = await env.MEDIA.list({ prefix: `projects/${projectId}/` });
+      expect(listed.objects.filter((o) => o.key.endsWith(".mp4")).map((o) => o.key)).toEqual([
+        first.storage_key,
+      ]);
+    } finally {
+      await introspector.dispose();
+    }
+  }, 30_000);
+
+  it("requires a Content-Length and rejects a body that doesn't match it", async () => {
+    const { projectId, introspector } = await readyProject();
+    try {
+      const a = await start(projectId);
+      const path = API_PATHS.projectRenderUpload(projectId, a.data!.render_request_id);
+      const headers = {
+        "x-dev-user": EMAIL,
+        "content-type": "video/mp4",
+        [RENDER_ATTEMPT_HEADER]: a.data!.render_attempt_token,
+      };
+      const bytes = mp4();
+      const streamOf = (b: Uint8Array) =>
+        new ReadableStream<Uint8Array>({
+          start(c) {
+            c.enqueue(b);
+            c.close();
+          },
+        });
+      // A streamed body with no length: refused before anything is stored.
+      const noLength = await SELF.fetch(`https://example.test${path}`, {
+        method: "POST",
+        headers,
+        body: streamOf(bytes),
+      });
+      expect(noLength.status).toBe(411);
+      // Declared longer than what's sent: nothing incomplete is stored.
+      const short = await SELF.fetch(`https://example.test${path}`, {
+        method: "POST",
+        headers: { ...headers, "content-length": String(bytes.length + 1000) },
+        body: streamOf(bytes),
+      });
+      expect(short.status).toBeGreaterThanOrEqual(400);
+      const listed = await env.MEDIA.list({ prefix: `projects/${projectId}/` });
+      expect(listed.objects.some((o) => o.key.endsWith(".mp4"))).toBe(false);
+    } finally {
+      await introspector.dispose();
+    }
+  }, 30_000);
 });
 
 describe("vendor files route", () => {

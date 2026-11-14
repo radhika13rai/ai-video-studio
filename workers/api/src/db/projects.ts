@@ -222,15 +222,93 @@ export async function setProjectStatusIf(
   return res.meta.changes === 1;
 }
 
-/** Shallow-merges keys into production_config (plan, fallbacks, render request …). */
+/**
+ * Sets top-level keys of production_config (plan, fallbacks, render request …) in one atomic
+ * UPDATE (json_set), so concurrent writers to different keys never overwrite each other.
+ */
 export async function mergeProductionConfig(
   db: D1Database,
   userId: string,
   projectId: string,
   patch: JsonObject,
 ): Promise<void> {
-  const current = await requireProject(db, userId, projectId);
-  await updateProject(db, userId, projectId, {
-    production_config: { ...current.production_config, ...patch },
-  });
+  const entries = Object.entries(patch);
+  if (entries.length === 0) return;
+  const setExpr = entries.reduce((acc) => `json_set(${acc}, ?, json(?))`, "production_config");
+  const args = entries.flatMap(([k, v]) => [`$."${k.replace(/"/g, "")}"`, JSON.stringify(v)]);
+  const res = await db
+    .prepare(
+      `UPDATE projects SET production_config = ${setExpr}, updated_at = ?
+       WHERE id = ? AND user_id = ?`,
+    )
+    .bind(...args, nowIso(), projectId, userId)
+    .run();
+  if (res.meta.changes !== 1) throw notFound("project");
+}
+
+/** The browser render currently holding the project, from production_config.render_attempt. */
+export interface RenderAttempt {
+  token: string;
+  started_at: string;
+}
+
+export function renderAttemptOf(config: JsonObject): RenderAttempt | null {
+  const a = config.render_attempt;
+  if (!a || typeof a !== "object" || Array.isArray(a)) return null;
+  const { token, started_at } = a as Record<string, unknown>;
+  return typeof token === "string" && typeof started_at === "string" ? { token, started_at } : null;
+}
+
+/**
+ * Atomically claims the project for one browser render and moves it to "rendering". Succeeds
+ * when no render holds it, the holder started before `staleBefore` (lease expired), or
+ * `takeover` is set. Returns false when another live render holds it.
+ */
+export async function claimRenderAttempt(
+  db: D1Database,
+  userId: string,
+  projectId: string,
+  attempt: RenderAttempt,
+  staleBefore: string,
+  takeover: boolean,
+): Promise<boolean> {
+  const res = await db
+    .prepare(
+      `UPDATE projects
+       SET status = 'rendering', updated_at = ?,
+           production_config = json_set(production_config, '$.render_attempt', json(?))
+       WHERE id = ? AND user_id = ? AND status IN ('awaiting_render', 'rendering')
+         AND (status = 'awaiting_render'
+              OR json_extract(production_config, '$.render_attempt.token') IS NULL
+              OR json_extract(production_config, '$.render_attempt.started_at') < ?
+              OR ? = 1)`,
+    )
+    .bind(nowIso(), JSON.stringify(attempt), projectId, userId, staleBefore, takeover ? 1 : 0)
+    .run();
+  return res.meta.changes === 1;
+}
+
+/**
+ * Releases the render held by `token`. With `toStatus`, also moves the project from
+ * "rendering" to that status (abort). Returns false if `token` doesn't hold the project.
+ */
+export async function releaseRenderAttempt(
+  db: D1Database,
+  userId: string,
+  projectId: string,
+  token: string,
+  toStatus?: ProjectStatus,
+): Promise<boolean> {
+  const res = await db
+    .prepare(
+      `UPDATE projects
+       SET production_config = json_remove(production_config, '$.render_attempt'),
+           status = ${toStatus ? "?" : "status"}, updated_at = ?
+       WHERE id = ? AND user_id = ?
+         AND json_extract(production_config, '$.render_attempt.token') = ?
+         ${toStatus ? "AND status = 'rendering'" : ""}`,
+    )
+    .bind(...(toStatus ? [toStatus] : []), nowIso(), projectId, userId, token)
+    .run();
+  return res.meta.changes === 1;
 }

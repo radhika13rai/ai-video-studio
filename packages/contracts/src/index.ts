@@ -34,6 +34,14 @@ export const IDEMPOTENCY_HEADER = "Idempotency-Key";
 /** Largest final video the API accepts (Workers allow 100 MB request bodies on the free plan). */
 export const MAX_RENDER_BYTES = 95 * 1024 * 1024;
 
+/**
+ * Header carrying the browser render's attempt token (from the render manifest) on upload,
+ * complete and abort. Only the render holding the project may finish or cancel it.
+ */
+export const RENDER_ATTEMPT_HEADER = "x-render-attempt";
+/** How long a render holds a project before another device may start one without taking over. */
+export const RENDER_LEASE_MINUTES = 30;
+
 /** Where the FFmpeg.wasm core is served from (same origin; see docs/RENDERER.md). */
 export const FFMPEG_CORE_VERSION = "0.12.10";
 export const FFMPEG_CORE_BASE = `/vendor/ffmpeg-core/${FFMPEG_CORE_VERSION}`;

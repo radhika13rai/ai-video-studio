@@ -21,6 +21,7 @@ import { encodeWav } from "./wav";
 
 const manifest = (durations: number[]): RenderManifest => ({
   render_request_id: "r",
+  render_attempt_token: "t",
   project: {
     id: "p",
     title: "t",

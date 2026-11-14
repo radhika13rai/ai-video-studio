@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.3.0 (2026-11-14)
+
+- One render per project: attempt tokens with a 30-minute lease; a second tab or device gets
+  "already rendering" with **Start anyway**; upload, complete and abort require the token, so a
+  stale tab can't cancel or overwrite a live render.
+- Uploads stream into R2 instead of being held in Worker memory, need a `Content-Length`, are
+  validated in storage, and replace the previous video only after the new one is saved; a damaged
+  upload never deletes the old video.
+- `production_config` updates are atomic per key.
+
 ## 1.2.0 (2026-11-14)
 
 - Quality check: the length is judged against what the renderer planned (scenes fitted to the
