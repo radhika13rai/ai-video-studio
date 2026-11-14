@@ -1,4 +1,4 @@
-/** Browser video renderer: Canvas frames, Web Audio mixing, WebCodecs or FFmpeg.wasm encoding. */
+/** Browser video renderer: Canvas/WebGL frames, Kokoro narration, Web Audio mixing, WebCodecs or FFmpeg.wasm encoding. */
 export {
   renderVideo,
   type RenderOptions,

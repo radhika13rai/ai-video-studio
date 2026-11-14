@@ -905,3 +905,10 @@ h3 {
 .btn.retry {
   margin-top: 8px;
 }
+
+.render-panel .check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.25rem 0 0.75rem;
+}

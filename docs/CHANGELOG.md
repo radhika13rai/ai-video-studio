@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.1.0 (2026-11-14)
+
+- Free motion: depth-based 3D camera moves (Depth Anything V2 Small + WebGL), shots with punch-ins
+  and handheld drift, five scene transitions, word-by-word captions synced to the narration,
+  kinetic text scenes, title intro, progress bar, vignette and film grain, generated background
+  music ducked under the voice.
+- Kokoro-82M narration in the browser (Heart default, Michael backup, picker in the render panel);
+  MeloTTS stays as the fallback. Scenes stretch to fit their narration.
+- Pinned, self-hosted renderer files (`VENDOR_FILES`): models and runtimes served from R2,
+  `/health` lists missing files, deploys upload them with sha256 checks.
+- Live: custom domain `studio.rawwgrid.com`, Google sign-in via Cloudflare Access; the deploy
+  workflow fails on wrangler errors and finds the custom-domain URL.
+
 ## 1.0.0 (2026-11-13)
 
 - Task 10: quality controller (MP4 structure via ranged R2 reads, duration, codecs, audio,

@@ -81,11 +81,18 @@ jobs:
             url=$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' "$RUNNER_TEMP/deploy.log" | head -1); fi
           if [ -z "$url" ]; then echo "::error::Could not find the deployed URL in wrangler's output."; exit 1; fi
           echo "url=$url" >> "$GITHUB_OUTPUT"
-      - name: Upload FFmpeg core if missing
+      - name: Cache downloaded renderer models
+        uses: actions/cache@v4
+        with:
+          path: node_modules/.cache/avs-vendor
+          key: avs-vendor-${{ hashFiles('packages/contracts/src/index.ts') }}
+          restore-keys: avs-vendor-
+      - name: Upload missing renderer files (FFmpeg, ONNX runtime, voice and depth models)
         working-directory: workers/api
         run: |
-          base="${{ steps.deploy.outputs.url }}/vendor/ffmpeg-core/$(node -p "require('../../renderer/node_modules/@ffmpeg/core/package.json').version")"
-          if curl -sfI "$base/ffmpeg-core.wasm" > /dev/null; then echo "FFmpeg core already present."; else bash ../../scripts/upload-ffmpeg-core.sh --remote; fi
+          health="${{ steps.deploy.outputs.url }}/api/v1/health"
+          for i in 1 2 3 4 5 6; do curl -sf "$health" > /dev/null && break; sleep 10; done
+          node ../../scripts/vendor-upload.mjs --remote --health "$health"
       - name: Health check
         run: |
           for i in 1 2 3 4 5 6; do
@@ -94,6 +101,7 @@ jobs:
           done
           echo "$body"
           echo "$body" | grep -q '"status":"ok"'
+          echo "$body" | grep -q '"missing_vendor_files":\[\]'
       - name: Report deployment status
         if: always()
         run: |

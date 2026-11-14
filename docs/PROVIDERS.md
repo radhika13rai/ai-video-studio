@@ -55,6 +55,10 @@ deliberately not used.
 MeloTTS returned WAV although its schema says MP3. `sniffMedia` reads the bytes to decide the
 type, dimensions and duration, and anything that isn't real media is rejected.
 
+**Narration in the browser:** the final narration is voiced at render time by Kokoro-82M in the
+user's browser (see `RENDERER.md`, ADR 033). MeloTTS audio from the workflow is kept as the
+fallback for browsers that can't run Kokoro, so the voice step above still runs.
+
 ### Registry and fallback
 
 `generateMedia` syncs code providers into the `providers` table, inserting rows that are missing
