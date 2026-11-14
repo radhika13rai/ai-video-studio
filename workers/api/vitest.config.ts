@@ -21,6 +21,9 @@ export default defineConfig({
           TEST_MIGRATIONS: migrations,
           TEST_MP4: JSON.stringify(fixtures),
           APP_ENV: "test",
+          // Production Access settings live in wrangler.jsonc; tests use the dev identity instead.
+          ACCESS_TEAM_DOMAIN: "",
+          ACCESS_AUD: "",
           AI_TEXT_PROVIDER: "none",
           AI_MEDIA_PROVIDER: "none",
           WORKFLOW_RETRY_DELAY: "1 second",

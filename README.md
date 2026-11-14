@@ -63,11 +63,11 @@ the FFmpeg core is in R2.
 
 **One-time, in the Cloudflare dashboard:**
 
-1. Open **Workers & Pages** once. This creates your free `workers.dev` subdomain.
+1. The app is served at **`https://studio.rawwgrid.com`** (a Workers custom domain; rawwgrid.com's
+   DNS is on Cloudflare). The `workers.dev` address is disabled in `wrangler.jsonc`.
 2. Set up sign-in (free for up to 50 users): **Zero Trust** → choose a team name → **Access →
-   Applications → Add → Self-hosted**. Use the Worker's address
-   (`ai-video-studio.<subdomain>.workers.dev`) and a policy that allows your email. Copy the
-   **Application Audience (AUD) tag**.
+   Applications → Add → Self-hosted** for `studio.rawwgrid.com`, with a policy that allows your
+   email. Copy the **Application Audience (AUD) tag**.
 3. Put the team domain (`<team>.cloudflareaccess.com`) and AUD tag in `workers/api/wrangler.jsonc`
    as `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD`. These are not secrets.
 
