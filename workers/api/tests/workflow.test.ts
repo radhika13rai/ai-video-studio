@@ -12,7 +12,11 @@ import {
   requireProject,
   upsertUserByEmail,
 } from "../src/db";
-import { RENDER_EVENT, renderRequestIdFor } from "../src/workflows/production-workflow";
+import {
+  MAX_RENDER_ATTEMPTS,
+  RENDER_EVENT,
+  renderRequestIdFor,
+} from "../src/workflows/production-workflow";
 
 const url = (p: string) => `https://example.test${p}`;
 const EMAIL = "producer@example.com";
@@ -86,7 +90,6 @@ describe("production workflow", () => {
     expect(res.status).toBe(202);
     const { data } = (await res.json()) as { data: { workflow_run_id: string; status: string } };
     expect(data.status).toBe("planning");
-    const renderId = await renderRequestIdFor(data.workflow_run_id);
     // The finish step checks that the event points at a real render of this project. Create it
     // once the media stage has run (that stage clears media left over from earlier runs).
     const [running] = await introspector.get();
@@ -105,25 +108,31 @@ describe("production workflow", () => {
       file_size: mp4.length,
     });
     const [instance] = await introspector.get();
-    await instance!.modify(async (m) => {
-      await m.mockEvent({
-        type: RENDER_EVENT,
-        payload: { render_request_id: renderId, asset_id: video.id },
+    // Every attempt fails the length check (a 15 s file, planned 30 s, no render plan
+    // reported), so the run uses all its render attempts, then fails.
+    for (let attempt = 1; attempt <= MAX_RENDER_ATTEMPTS; attempt++) {
+      const sfx = attempt === 1 ? "" : `-${attempt}`;
+      if (attempt > 1) await instance!.waitForStepResult({ name: `request-render${sfx}` });
+      const id = await renderRequestIdFor(data.workflow_run_id, attempt);
+      await instance!.modify(async (m) => {
+        await m.mockEvent({
+          type: RENDER_EVENT,
+          payload: { render_request_id: id, asset_id: video.id },
+        });
       });
-    });
+      await instance!.waitForStepResult({ name: `finish${sfx}` });
+    }
     await instance!.waitForStatus("complete");
-    expect(await instance!.getOutput()).toMatchObject({
-      status: "quality_failed",
-      quality: "failed",
-      scenes: 6,
-    });
-
     const user = await upsertUserByEmail(env.DB, EMAIL);
     const project = await requireProject(env.DB, user.id, projectId);
     expect(project.status).toBe("failed");
     expect(project.production_config).toMatchObject({
       plan: { video_type: "faceless", scene_count: 6 },
-      render_request: { id: renderId },
+      render_request: {
+        id: await renderRequestIdFor(data.workflow_run_id, MAX_RENDER_ATTEMPTS),
+        attempt: MAX_RENDER_ATTEMPTS,
+        last_failure: expect.stringMatching(/^Quality check failed/),
+      },
     });
     const notes = project.production_config.fallbacks as string[];
     expect(notes[0]).toMatch(
@@ -145,6 +154,9 @@ describe("production workflow", () => {
     const run = await getLatestWorkflowRun(env.DB, user.id, projectId);
     expect(run).toMatchObject({ status: "failed" });
     expect(run?.error_message).toMatch(/^Quality check failed: 15\.00 s \(planned 30 s\)\./);
+    expect(run?.error_message).toMatch(/after 3 render attempts/);
+    // Media was generated once: retries never re-run the image or narration steps.
+    expect(jobs.filter((j) => j.agent_name === "visual-artist")).toHaveLength(6);
     const report = await getLatestQualityReport(env.DB, user.id, projectId);
     expect(report).toMatchObject({ overall_status: "failed" });
 
@@ -154,6 +166,77 @@ describe("production workflow", () => {
       .bind(projectId)
       .first<{ n: number }>();
     expect(usage?.n).toBe(300); // two model calls × 150 tokens
+  });
+
+  it("after a failed quality check, asks for another render without regenerating media", async () => {
+    setTextModelOverride(scripted(SCRIPT, BOARD));
+    await using introspector = await introspectWorkflow(env.PRODUCTION_WORKFLOW);
+    const projectId = await newProject();
+    const res = await call(API_PATHS.projectGenerate(projectId), { method: "POST" });
+    const runId = ((await res.json()) as { data: { workflow_run_id: string } }).data
+      .workflow_run_id;
+    const [instance] = await introspector.get();
+    await instance!.waitForStepResult({ name: "request-render" });
+    const owner = await upsertUserByEmail(env.DB, EMAIL);
+    const mp4 = Uint8Array.from(
+      atob((JSON.parse(env.TEST_MP4) as Record<string, string>)["sample-15s.mp4"] ?? ""),
+      (c) => c.charCodeAt(0),
+    );
+    const render = async (key: string, metadata: Record<string, unknown>) => {
+      await env.MEDIA.put(key, mp4);
+      return createAsset(env.DB, owner.id, projectId, {
+        asset_type: "render",
+        storage_key: key,
+        mime_type: "video/mp4",
+        file_size: mp4.length,
+        metadata,
+      });
+    };
+
+    // Attempt 1: no render plan reported, 15 s against 30 s planned → fails.
+    const first = await render(`projects/${projectId}/a1.mp4`, {});
+    await instance!.modify(async (m) => {
+      await m.mockEvent({
+        type: RENDER_EVENT,
+        payload: { render_request_id: await renderRequestIdFor(runId), asset_id: first.id },
+      });
+    });
+    await instance!.waitForStepResult({ name: "request-render-2" });
+    let project = await requireProject(env.DB, owner.id, projectId);
+    expect(project.status).toBe("awaiting_render");
+    expect(project.production_config.render_request).toMatchObject({
+      id: await renderRequestIdFor(runId, 2),
+      attempt: 2,
+      max_attempts: MAX_RENDER_ATTEMPTS,
+      last_failure: expect.stringMatching(/15\.00 s \(planned 30 s\)/),
+    });
+    expect(await getLatestWorkflowRun(env.DB, owner.id, projectId)).toMatchObject({
+      status: "waiting",
+    });
+    const jobsBefore = await listJobs(env.DB, owner.id, projectId);
+    const scenesBefore = await listScenes(env.DB, owner.id, projectId);
+
+    // Attempt 2: the renderer reports it planned 15 s (its own timing) → only a warning.
+    const second = await render(`projects/${projectId}/a2.mp4`, {
+      reported_duration_seconds: 15,
+    });
+    await instance!.modify(async (m) => {
+      await m.mockEvent({
+        type: RENDER_EVENT,
+        payload: { render_request_id: await renderRequestIdFor(runId, 2), asset_id: second.id },
+      });
+    });
+    await instance!.waitForStatus("complete");
+    expect(await instance!.getOutput()).toMatchObject({ status: "completed", quality: "warning" });
+    project = await requireProject(env.DB, owner.id, projectId);
+    expect(project.status).toBe("completed");
+    // Nothing was regenerated: same jobs and the same scenes as before the retry.
+    expect((await listJobs(env.DB, owner.id, projectId)).length).toBe(jobsBefore.length);
+    expect((await listScenes(env.DB, owner.id, projectId)).map((s) => s.id)).toEqual(
+      scenesBefore.map((s) => s.id),
+    );
+    const report = await getLatestQualityReport(env.DB, owner.id, projectId);
+    expect(report?.checks).toMatchObject({ attempt: 2 });
   });
 
   it("stops at 'Ready to render' until the browser finishes", async () => {

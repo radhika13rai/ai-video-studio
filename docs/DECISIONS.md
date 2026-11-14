@@ -211,3 +211,12 @@ later as another media capability.
 Hugging Face revision and sha256. The Worker serves only listed paths from R2; `/health` reports
 missing ones and the deploy uploads them. **Why:** reproducible renders, no CDN at runtime, and a
 failed or tampered download stops the deploy instead of reaching users.
+
+## 036. Up to three render attempts per run; length judged against the render's own plan (2026-11-14)
+
+A failed quality check returns the project to "Ready to render" instead of ending the run, up to
+three attempts; the last failure fails the run. The length check compares the MP4 with the length
+the renderer reports it planned, when plausible, and treats extra length versus the brief as a
+warning. **Why:** scenes are deliberately stretched to fit the narration, so the brief is no
+longer the right yardstick, and a failed render shouldn't force regenerating the script, images
+and voice (time and free AI quota). Attempt 1 keeps its step names so in-flight runs resume.

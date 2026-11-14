@@ -51,16 +51,17 @@ normalization, and saving a storyboard through the real repository into local D1
 
 ## Production workflow (`src/workflows/production-workflow.ts`)
 
-| Step              | Project status            | What happens                                             |
-| ----------------- | ------------------------- | -------------------------------------------------------- |
-| `load-project`    | planning                  | Reads the brief (ownership enforced through `userId`)    |
-| `director`        | planning                  | Plan saved to `production_config.plan`                   |
-| `scriptwriter`    | planning                  | Script saved as the job's output                         |
-| `storyboard`      | planning                  | Scenes saved with `replaceScenes`                        |
-| `generate-assets` | generating                | Checks the provider registry; records fallbacks openly   |
-| `request-render`  | awaiting_render           | Saves a render request; the run status becomes `waiting` |
-| `wait-for-render` | awaiting_render           | Waits for the `render-complete` event (7-day timeout)    |
-| `finish`          | quality_check → completed | Checks the event matches the render request              |
+| Step                                                | Project status            | What happens                                             |
+| --------------------------------------------------- | ------------------------- | -------------------------------------------------------- |
+| `load-project`                                      | planning                  | Reads the brief (ownership enforced through `userId`)    |
+| `director`                                          | planning                  | Plan saved to `production_config.plan`                   |
+| `scriptwriter`                                      | planning                  | Script saved as the job's output                         |
+| `storyboard`                                        | planning                  | Scenes saved with `replaceScenes`                        |
+| `generate-assets`                                   | generating                | Checks the provider registry; records fallbacks openly   |
+| `request-render`                                    | awaiting_render           | Saves a render request; the run status becomes `waiting` |
+| `wait-for-render`                                   | awaiting_render           | Waits for the `render-complete` event (7-day timeout)    |
+| `finish`                                            | quality_check → completed | Checks the event matches the render request, runs QC     |
+| `request-render-N`, `wait-for-render-N`, `finish-N` | awaiting_render → …       | Attempts 2–3 after a failed QC (see below)               |
 
 - **Jobs:** every agent runs through `runAgentJob`, which creates a job with a stable ID derived
   from the run, so a retried step reuses it. A completed job replays its saved output. A running
@@ -73,9 +74,16 @@ normalization, and saving a storyboard through the real repository into local D1
 - **Cancel:** the endpoint marks the run cancelled before terminating the instance. Every step
   checks the run first, so nothing more is written after a cancel.
 - **Usage:** model tokens are recorded in `usage_events` for quota tracking.
-- **Media fallback:** until Task 8 registers providers, the run notes, for example, "No image
-  provider is configured yet; scenes will render as styled text cards", and the project page shows
-  it. The requested visuals are never swapped silently.
+- **Media fallback:** when no provider can produce a scene's media, the run notes it (for example
+  "6 of 6 scenes have no generated image … they will render as styled text cards") and the project
+  page shows it. The requested visuals are never swapped silently.
+- **Render attempts:** a run allows `MAX_RENDER_ATTEMPTS` (3) renders. A failed quality check
+  sends the project back to `awaiting_render` with `production_config.render_request` =
+  `{ id, attempt, max_attempts, last_failure }` and a new request id
+  (`renderRequestIdFor(runId, attempt)`); scenes, images and narration are kept and "Retry media"
+  still works. Attempt 1 keeps the original step names and id, so runs started earlier resume.
+  Only a failed QC uses an attempt (a stopped browser render doesn't). The last failure fails the
+  run "after 3 render attempts".
 
 ## Quality controller (`src/quality/`, deterministic)
 
@@ -88,10 +96,19 @@ Runs in the workflow's `finish` step, after the render event. It reads the MP4 w
 | video             | no video track                               | codec isn't H.264                      |
 | resolution        | –                                            | not 720p or 1080p for the aspect ratio |
 | audio             | narration was generated but there's no audio | the video is silent by design          |
-| duration          | off by more than 25% of the plan             | off by more than 0.5 s                 |
+| render_length     | off by more than 25% of the render's plan    | off by more than 0.5 s                 |
+| duration          | see below                                    | off the brief by more than 0.5 s       |
 | faststart         | –                                            | `moov` after `mdat`                    |
 | bitrate           | –                                            | under 300 kb/s                         |
 | images, narration | –                                            | scenes without generated media         |
+
+**Length.** Scenes are lengthened in the browser to fit their narration, so the video can be longer
+than the brief. The renderer reports the length it planned (`x-video-duration`, stored as
+`reported_duration_seconds`). When that value is plausible (0.5–2× the brief and at most 1.5× the
+maximum length), `render_length` compares the real MP4 length with it (this catches truncated
+renders), and `duration` only warns about the brief, failing only below 25% of it or above 1.5× the
+maximum. Without a plausible value, `duration` compares with the brief as before (fail beyond
+25%). The real length always comes from the MP4, never from the client.
 
 Score = 100 − 30 per fail − 8 per warning. Any fail marks the project `failed` with the reasons on
 the run; otherwise it's `completed`. The report, with plain-language recommendations, is stored

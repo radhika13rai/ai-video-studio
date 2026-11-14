@@ -1,4 +1,4 @@
-import type { QualityStatus } from "@avs/types";
+import { LIMITS, type QualityStatus } from "@avs/types";
 import type { Asset, Project, Scene } from "../db";
 import { inspectMp4, Mp4Error, type Mp4Info, type ReadAt } from "./mp4";
 
@@ -45,6 +45,11 @@ export async function runQualityChecks(input: {
   assets: Pick<Asset, "scene_id" | "asset_type">[];
   narrationPlanned: boolean;
   video: { read: ReadAt; size: number } | null;
+  /**
+   * Length the browser renderer planned after fitting scenes to the narration (reported with
+   * the upload). Used only when it's plausible; the real length always comes from the MP4.
+   */
+  renderPlanSeconds?: number | null;
 }): Promise<QualityResult> {
   const checks: QualityCheck[] = [];
   const recs: string[] = [];
@@ -151,17 +156,47 @@ export async function runQualityChecks(input: {
       );
 
     const planned = input.project.duration_seconds;
-    const off = Math.abs(mp4.durationSeconds - planned);
-    const durStatus: CheckStatus = off <= 0.5 ? "pass" : off <= planned * 0.25 ? "warn" : "fail";
-    add(
-      {
-        id: "duration",
-        label: "Length",
-        status: durStatus,
-        detail: `${mp4.durationSeconds.toFixed(2)} s (planned ${planned} s).`,
-      },
-      "Render the video again.",
-    );
+    const actual = mp4.durationSeconds;
+    const plan = plausibleRenderPlan(input.renderPlanSeconds, planned);
+    const durationRec = "Render the video again.";
+    if (plan === null) {
+      // No usable render plan (older uploads): compare with the brief, as before.
+      const off = Math.abs(actual - planned);
+      add(
+        {
+          id: "duration",
+          label: "Length",
+          status: off <= 0.5 ? "pass" : off <= planned * 0.25 ? "warn" : "fail",
+          detail: `${actual.toFixed(2)} s (planned ${planned} s).`,
+        },
+        durationRec,
+      );
+    } else {
+      // Did the file come out as long as the renderer meant it to? Catches truncated renders.
+      const off = Math.abs(actual - plan);
+      add(
+        {
+          id: "render_length",
+          label: "Render length",
+          status: off <= 0.5 ? "pass" : off <= plan * 0.25 ? "warn" : "fail",
+          detail: `${actual.toFixed(2)} s (the render planned ${plan.toFixed(2)} s).`,
+        },
+        durationRec,
+      );
+      // Scenes stretch to fit their narration, so a longer video than the brief is expected:
+      // it's a warning, and fails only when absurdly far off.
+      const briefOff = Math.abs(actual - planned);
+      const absurd = actual < planned * 0.25 || actual > LIMITS.maxVideoDurationSeconds * 1.5;
+      add(
+        {
+          id: "duration",
+          label: "Length",
+          status: briefOff <= 0.5 ? "pass" : absurd ? "fail" : "warn",
+          detail: `${actual.toFixed(2)} s (planned ${planned} s${actual > planned + 0.5 ? "; scenes were lengthened to fit the narration" : ""}).`,
+        },
+        "Shorten the narration or raise the planned length if this matters for your platform.",
+      );
+    }
 
     add(
       {
@@ -234,4 +269,15 @@ export async function runQualityChecks(input: {
     recommendations: [...new Set(recs)],
     mp4,
   };
+}
+
+/** The renderer's planned length, if it is a believable value for this brief; else null. */
+export function plausibleRenderPlan(
+  reported: number | null | undefined,
+  planned: number,
+): number | null {
+  if (typeof reported !== "number" || !Number.isFinite(reported) || reported <= 0) return null;
+  if (reported < planned * 0.5 || reported > planned * 2) return null;
+  if (reported > LIMITS.maxVideoDurationSeconds * 1.5) return null;
+  return reported;
 }
