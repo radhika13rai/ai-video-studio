@@ -1,13 +1,14 @@
 import type { KokoroVoiceId } from "@avs/contracts";
 import type { RenderManifest } from "@avs/schemas";
 import { decodeAudio, mixNarration, samplesToBuffer } from "./audio";
-import { loadDepthEstimator, type DepthMap } from "./depth";
+import type { DepthMap } from "./depth";
 import { JpegFramesSink, pickWebCodecsConfig, WebCodecsSink, type FrameSink } from "./encoders";
 import { assembleMp4, loadFFmpeg } from "./ffmpeg";
 import { makeGrain, paintFrame, type FrameContext, type SceneMedia } from "./painter";
 import { ParallaxRenderer } from "./parallax";
 import { buildTimeline, FPS, outputSize, wordGroups, wordTimings, type Quality } from "./timeline";
-import { BACKUP_VOICE, DEFAULT_VOICE, fitSpeed, loadNarrator, type Narrator } from "./voice";
+import { startModelWorker, type ModelWorker } from "./ml";
+import { BACKUP_VOICE, DEFAULT_VOICE, fitSpeed, type Speech } from "./voice";
 
 export type RenderStage = "loading" | "frames" | "audio" | "encoding" | "done";
 
@@ -34,6 +35,8 @@ export interface RenderOptions {
   music?: boolean;
   /** 3D-depth camera moves (default on; falls back to flat moves if unavailable). */
   depth?: boolean;
+  /** Override the on-device model time limits in milliseconds (tests). */
+  limits?: Partial<typeof LIMITS>;
 }
 
 export interface RenderResult {
@@ -70,6 +73,7 @@ export async function renderVideo(
   const notes: string[] = [];
   const scenes = manifest.scenes;
   const n = scenes.length;
+  const lim = { ...LIMITS, ...opts.limits };
 
   // 1. Download pictures; work out depth; voice the narration.
   report({ stage: "loading", progress: 0, detail: "Downloading pictures" });
@@ -98,40 +102,58 @@ export async function renderVideo(
   const parallax = images.some(Boolean) ? ParallaxRenderer.create(width, height) : null;
   let motion: RenderResult["motion"] = "flat";
   if (parallax) {
-    let depthOf: ((b: Blob) => Promise<DepthMap>) | null = null;
-    if (opts.depth !== false) {
-      try {
-        report({ stage: "loading", progress: 0.1, detail: "Loading the 3D depth model" });
-        depthOf = await loadDepthEstimator((f) =>
-          report({
-            stage: "loading",
-            progress: 0.1 + 0.15 * f,
-            detail: "Loading the 3D depth model",
-          }),
-        );
-      } catch (e) {
-        notes.push(`3D depth unavailable (${errText(e)}); used flat camera moves.`);
-      }
-    }
-    for (const [i, image] of images.entries()) {
-      check(opts.signal);
-      if (!image) continue;
-      let depth: DepthMap | null = null;
-      const blob = blobs[i];
-      if (depthOf && blob) {
-        report({
-          stage: "loading",
-          progress: 0.25 + (0.15 * i) / n,
-          detail: `Depth for scene ${i + 1}`,
-        });
+    // Depth runs in its own worker; if it's too slow here, it's stopped and moves stay flat.
+    const worker = opts.depth !== false ? startModelWorker() : null;
+    let depthReady = false;
+    try {
+      if (worker) {
         try {
-          depth = await depthOf(blob);
-          motion = "depth";
+          await ticking(
+            worker.loadDepth(lim.loadDepth, (f) =>
+              report({
+                stage: "loading",
+                progress: 0.05 + 0.1 * f,
+                detail: "Loading the 3D model",
+              }),
+            ),
+            (sec) =>
+              report({
+                stage: "loading",
+                progress: 0.05,
+                detail: `Loading the 3D model · ${sec} s`,
+              }),
+          );
+          depthReady = true;
         } catch (e) {
-          notes.push(`Scene ${i + 1}: depth failed (${errText(e)}).`);
+          notes.push(`3D depth unavailable (${errText(e)}); used flat camera moves.`);
         }
+      } else if (opts.depth !== false) {
+        notes.push("This browser can't run background workers; used flat camera moves.");
       }
-      parallax.addScene(i, image, depth);
+      for (const [i, image] of images.entries()) {
+        check(opts.signal);
+        if (!image) continue;
+        let depth: DepthMap | null = null;
+        const blob = blobs[i];
+        if (worker && depthReady && !worker.stopped && blob) {
+          const detail = `3D depth for scene ${i + 1} of ${n}`;
+          try {
+            depth = await ticking(worker.depth(blob, lim.depthPerImage), (sec) =>
+              report({
+                stage: "loading",
+                progress: 0.15 + (0.15 * i) / n,
+                detail: `${detail} · ${sec} s`,
+              }),
+            );
+            motion = "depth";
+          } catch (e) {
+            notes.push(`Scene ${i + 1}: depth skipped (${errText(e)}).`);
+          }
+        }
+        parallax.addScene(i, image, depth);
+      }
+    } finally {
+      worker?.terminate(); // stop it (and free its memory) before the voice model loads
     }
   }
 
@@ -241,9 +263,32 @@ export async function renderVideo(
   }
 }
 
+/** Time limits for the on-device models (generous: phones are slow, downloads can be too). */
+export const LIMITS = {
+  loadDepth: 180_000,
+  depthPerImage: 60_000,
+  loadVoice: 300_000,
+  firstSpeech: 120_000,
+  speech: 60_000,
+};
+
+/** Awaits `p`, calling `tick` with the elapsed seconds once a second so the UI shows progress. */
+async function ticking<T>(p: Promise<T>, tick: (seconds: number) => void): Promise<T> {
+  const started = Date.now();
+  const timer = setInterval(() => tick(Math.round((Date.now() - started) / 1000)), 1000);
+  try {
+    return await p;
+  } finally {
+    clearInterval(timer);
+  }
+}
+
+/** Typical Kokoro pace at speed 1, used to pick a speed before speaking (no second pass). */
+const WORDS_PER_SECOND = 2.6;
+
 /**
- * Narration for every scene: Kokoro in the browser (chosen voice, then the backup voice), and
- * the server's provider audio for any scene Kokoro couldn't voice.
+ * Narration for every scene: Kokoro in a background worker (chosen voice, then the backup
+ * voice), and the server's provider audio for any scene Kokoro couldn't voice in time.
  */
 async function voiceScenes(
   manifest: RenderManifest,
@@ -259,63 +304,93 @@ async function voiceScenes(
   let usedKokoro = false;
   let usedProvider = false;
 
+  const lim = { ...LIMITS, ...opts.limits };
   const wantKokoro = opts.narrator !== "provider" && scenes.some((s) => s.narration?.trim());
-  let narrator: Narrator | null = null;
+  let worker: ModelWorker | null = null;
   if (wantKokoro) {
-    try {
-      report({ stage: "loading", progress: 0.4, detail: "Loading the Kokoro voice" });
-      narrator = await loadNarrator((f) =>
-        report({ stage: "loading", progress: 0.4 + 0.3 * f, detail: "Loading the Kokoro voice" }),
-      );
-    } catch (e) {
-      notes.push(`Kokoro voice unavailable (${errText(e)}); used the server narration.`);
+    worker = startModelWorker();
+    if (!worker)
+      notes.push("This browser can't run background workers; used the server narration.");
+    else {
+      try {
+        await ticking(
+          worker.loadVoice(lim.loadVoice, (f) =>
+            report({
+              stage: "loading",
+              progress: 0.3 + 0.3 * f,
+              detail: "Loading the Kokoro voice",
+            }),
+          ),
+          (sec) =>
+            report({
+              stage: "loading",
+              progress: 0.3,
+              detail: `Loading the Kokoro voice · ${sec} s`,
+            }),
+        );
+      } catch (e) {
+        notes.push(`Kokoro voice unavailable (${errText(e)}); used the server narration.`);
+        worker.terminate();
+        worker = null;
+      }
     }
   }
 
   let voice = opts.voice ?? DEFAULT_VOICE;
-  for (const [i, s] of scenes.entries()) {
-    check(opts.signal);
-    const text = s.narration?.trim();
-    if (narrator && text) {
-      report({
-        stage: "loading",
-        progress: 0.7 + (0.3 * i) / scenes.length,
-        detail: `Voicing scene ${i + 1} of ${scenes.length}`,
-      });
-      try {
-        let speech;
+  let first = true;
+  try {
+    for (const [i, s] of scenes.entries()) {
+      check(opts.signal);
+      const text = s.narration?.trim();
+      if (worker && !worker.stopped && text) {
+        const detail = `Voicing scene ${i + 1} of ${scenes.length}`;
+        const words = text.split(/\s+/).length;
+        const speed = fitSpeed(words / WORDS_PER_SECOND, s.duration_seconds - 0.35);
+        const limit = first ? lim.firstSpeech : lim.speech;
+        const say = (v: KokoroVoiceId) =>
+          ticking(worker!.speak(text, v, speed, limit), (sec) =>
+            report({
+              stage: "loading",
+              progress: 0.6 + (0.4 * i) / scenes.length,
+              detail: `${detail} · ${sec} s`,
+            }),
+          );
         try {
-          speech = await narrator.speak(text, voice);
+          let speech: Speech;
+          try {
+            speech = await say(voice);
+          } catch (e) {
+            if (voice === BACKUP_VOICE || worker.stopped) throw e;
+            notes.push(`Voice ${voice} failed (${errText(e)}); switched to ${BACKUP_VOICE}.`);
+            voice = BACKUP_VOICE;
+            speech = await say(voice);
+          }
+          first = false;
+          buffers[i] = samplesToBuffer(speech.samples, speech.sampleRate);
+          usedKokoro = true;
+          continue;
         } catch (e) {
-          if (voice === BACKUP_VOICE) throw e;
-          notes.push(`Voice ${voice} failed (${errText(e)}); switched to ${BACKUP_VOICE}.`);
-          voice = BACKUP_VOICE;
-          speech = await narrator.speak(text, voice);
+          if (opts.signal?.aborted) throw e;
+          notes.push(
+            `Scene ${s.scene_number}: Kokoro failed (${errText(e)}); used the server voice.`,
+          );
         }
-        // Speak a little faster (up to 1.2×) rather than run past the planned scene length.
-        const spoken = speech.samples.length / speech.sampleRate;
-        const speed = fitSpeed(spoken, s.duration_seconds - 0.35);
-        if (speed > 1) speech = await narrator.speak(text, voice, speed);
-        buffers[i] = samplesToBuffer(speech.samples, speech.sampleRate);
-        usedKokoro = true;
-        continue;
-      } catch (e) {
-        if (opts.signal?.aborted) throw e;
-        notes.push(`Scene ${s.scene_number}: Kokoro failed (${errText(e)}).`);
+      }
+      if (s.voice_url) {
+        try {
+          const res = await doFetch(s.voice_url, fetchInit);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          buffers[i] = await decodeAudio(await res.arrayBuffer());
+          if (buffers[i]) usedProvider = true;
+          else missing.push(`Scene ${s.scene_number} narration (couldn't decode)`);
+        } catch (e) {
+          if (opts.signal?.aborted) throw e;
+          missing.push(`Scene ${s.scene_number} narration`);
+        }
       }
     }
-    if (s.voice_url) {
-      try {
-        const res = await doFetch(s.voice_url, fetchInit);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        buffers[i] = await decodeAudio(await res.arrayBuffer());
-        if (buffers[i]) usedProvider = true;
-        else missing.push(`Scene ${s.scene_number} narration (couldn't decode)`);
-      } catch (e) {
-        if (opts.signal?.aborted) throw e;
-        missing.push(`Scene ${s.scene_number} narration`);
-      }
-    }
+  } finally {
+    worker?.terminate();
   }
   return {
     buffers,

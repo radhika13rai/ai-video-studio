@@ -73,6 +73,13 @@ a copy of the ONNX `.wasm` into the build; it's unused (the runtime is pointed a
   later renders use the browser cache.
 - Voices: **Heart** (`af_heart`, default) and **Michael** (`am_michael`, backup), chosen in the
   render panel and remembered per browser. If the chosen voice fails, the backup is used.
+- Kokoro and the depth model run in **background workers** (`ml.worker.ts`, one each), so the
+  page stays responsive and shows a live seconds counter. Every step has a time limit (load voice
+  300 s, first scene 120 s, later scenes 60 s; load depth 180 s, each picture 60 s). When one runs
+  out, that worker is terminated: remaining scenes use the server narration, or flat moves. A
+  phone that's too slow for Kokoro still gets a finished video.
+- The speaking speed is chosen before speaking (≈2.6 words/s at 1×, at most 1.2×), so each scene
+  is voiced once.
 - If Kokoro can't load at all (old browser, blocked download), scenes use the MeloTTS narration the
   workflow already generated, and the result says so (`narration: "provider"`, `notes`).
 - Text-to-phoneme uses the `phonemizer` package, which bundles eSpeak NG (GPL-3.0). The same is
