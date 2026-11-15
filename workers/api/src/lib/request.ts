@@ -14,16 +14,17 @@ function describe(error: z.ZodError): string {
 export async function readJson<S extends z.ZodType>(
   request: Request,
   schema: S,
+  maxBytes = MAX_JSON_BYTES,
 ): Promise<z.output<S>> {
   const type = request.headers.get("content-type") ?? "";
   if (!/^application\/json\b/i.test(type))
     throw new ApiError(415, "UNSUPPORTED_MEDIA_TYPE", "Send the body as application/json.");
   const declared = Number(request.headers.get("content-length") ?? "0");
-  if (declared > MAX_JSON_BYTES)
-    throw new ApiError(413, "PAYLOAD_TOO_LARGE", `Body must be at most ${MAX_JSON_BYTES} bytes.`);
+  if (declared > maxBytes)
+    throw new ApiError(413, "PAYLOAD_TOO_LARGE", `Body must be at most ${maxBytes} bytes.`);
   const text = await request.text();
-  if (new TextEncoder().encode(text).byteLength > MAX_JSON_BYTES)
-    throw new ApiError(413, "PAYLOAD_TOO_LARGE", `Body must be at most ${MAX_JSON_BYTES} bytes.`);
+  if (new TextEncoder().encode(text).byteLength > maxBytes)
+    throw new ApiError(413, "PAYLOAD_TOO_LARGE", `Body must be at most ${maxBytes} bytes.`);
   let raw: unknown;
   try {
     raw = JSON.parse(text);

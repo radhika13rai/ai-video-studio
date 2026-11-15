@@ -1,5 +1,4 @@
 import {
-  API_PATHS,
   API_PREFIX,
   MAX_RENDER_BYTES,
   RENDER_ATTEMPT_HEADER,
@@ -14,7 +13,6 @@ import {
   getAsset,
   getLatestWorkflowRun,
   listAssets,
-  listScenes,
   releaseRenderAttempt,
   renderAttemptOf,
   requireProject,
@@ -25,8 +23,8 @@ import { ApiError } from "../lib/errors";
 import { jsonOk } from "../lib/http";
 import { readJson } from "../lib/request";
 import type { Router } from "../lib/router";
-import { productionBlueprintSchema } from "../creative/blueprint";
 import { inspectMp4, r2Reader } from "../quality/mp4";
+import { compileForRender, currentTimeline } from "../timeline";
 import { RENDER_EVENT } from "../workflows/production-workflow";
 import type { Ctx } from "./projects";
 
@@ -87,49 +85,11 @@ export function registerRenderRoutes(router: Router<Ctx>): void {
       );
     }
 
-    const run = await getLatestWorkflowRun(db, user.id, projectId);
-    const runPrefix = run ? `projects/${projectId}/runs/${run.id}/` : null;
-    const assets = (await listAssets(db, user.id, projectId)).filter(
-      (a) => !runPrefix || a.storage_key.startsWith(runPrefix),
-    );
-    const url = (assetId: string) => API_PATHS.assetContent(projectId, assetId);
-    // The Creative Director's direction, when this project has a valid blueprint.
-    const blueprint = productionBlueprintSchema.safeParse(project.production_config.blueprint);
-    const direction = new Map(
-      blueprint.success ? blueprint.data.scenes.map((s) => [s.scene_number, s]) : [],
-    );
-    let start = 0;
-    const scenes = (await listScenes(db, user.id, projectId)).map((s) => {
-      const image = assets.find((a) => a.scene_id === s.id && a.asset_type === "image");
-      const voice = assets.find((a) => a.scene_id === s.id && a.asset_type === "voiceover");
-      const video = assets.find((a) => a.scene_id === s.id && a.asset_type === "video");
-      const credit =
-        video && typeof video.license?.credit === "string" ? video.license.credit : null;
-      const scene = {
-        scene_number: s.scene_number,
-        start_seconds: Math.round(start * 1000) / 1000,
-        duration_seconds: s.duration_seconds,
-        visual_type: s.visual_type,
-        caption: (s.voiceover ?? "").trim() || s.description,
-        narration: (s.voiceover ?? "").trim() || null,
-        image_url: image ? url(image.id) : null,
-        voice_url: voice ? url(voice.id) : null,
-        ...(video ? { video_url: url(video.id), credit } : {}),
-        ...(() => {
-          const d = direction.get(s.scene_number);
-          return d
-            ? {
-                shot: d.shot,
-                camera: d.camera,
-                transition_in: d.transition_in,
-                on_screen_text: d.on_screen_text,
-              }
-            : {};
-        })(),
-      };
-      start += s.duration_seconds;
-      return scene;
-    });
+    // The render plan comes from the project's timeline: the saved edit, or the one its
+    // production implies (which renders exactly as before the editor existed).
+    const { timeline, assets } = await currentTimeline(db, user.id, project);
+    const compiled = compileForRender(projectId, timeline, assets);
+    const scenes = compiled.scenes;
     if (scenes.length === 0)
       throw new ApiError(409, "INVALID_STATE", "This project has no scenes to render.");
     const fallbacks = Array.isArray(project.production_config.fallbacks)
@@ -141,14 +101,12 @@ export function registerRenderRoutes(router: Router<Ctx>): void {
       project: {
         id: project.id,
         title: project.title,
-        aspect_ratio: project.aspect_ratio as RenderManifest["project"]["aspect_ratio"],
-        duration_seconds: start,
+        aspect_ratio: compiled.aspect_ratio,
+        duration_seconds: compiled.duration_seconds,
       },
       scenes,
       fallbacks,
-      ...(blueprint.success
-        ? { music: { mood: blueprint.data.music.mood, tempo_bpm: blueprint.data.music.tempo_bpm } }
-        : {}),
+      ...(compiled.music ? { music: compiled.music } : {}),
     };
     return jsonOk(manifest);
   });

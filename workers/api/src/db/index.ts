@@ -12,6 +12,7 @@ export * from "./providers";
 export * from "./workflow-runs";
 export * from "./usage";
 export * from "./provider-jobs";
+export * from "./timelines";
 export * from "./quality-reports";
 export { newId, nowIso } from "./util";
 export type { JsonObject } from "./schemas";

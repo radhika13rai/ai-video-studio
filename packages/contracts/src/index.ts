@@ -18,6 +18,10 @@ export const API_PATHS = {
     `${API_PREFIX}/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/content`,
   providers: `${API_PREFIX}/providers`,
   providerCosts: `${API_PREFIX}/providers/costs`,
+  projectTimeline: (id: string) => `${API_PREFIX}/projects/${id}/timeline`,
+  projectTimelineRevisions: (id: string) => `${API_PREFIX}/projects/${id}/timeline/revisions`,
+  projectTimelineRestore: (id: string, rev: number) =>
+    `${API_PREFIX}/projects/${id}/timeline/revisions/${rev}/restore`,
   projectRender: (id: string) => `${API_PREFIX}/projects/${encodeURIComponent(id)}/render`,
   projectRenderUpload: (id: string, renderRequestId: string) =>
     `${API_PREFIX}/projects/${encodeURIComponent(id)}/render/upload?render_request_id=${encodeURIComponent(renderRequestId)}`,
