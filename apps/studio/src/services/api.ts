@@ -33,6 +33,13 @@ import {
   projectSchema,
   userSchema,
 } from "@avs/schemas";
+import {
+  storedTimelineSchema,
+  timelineRevisionSchema,
+  type StoredTimeline,
+  type Timeline,
+  type TimelineRevision,
+} from "@avs/schemas";
 import { z } from "zod";
 
 const BASE_URL: string = import.meta.env?.VITE_API_BASE_URL ?? "";
@@ -50,7 +57,7 @@ export class ApiClientError extends Error {
 }
 
 interface RequestOptions {
-  method?: "GET" | "POST" | "PATCH" | "DELETE";
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   body?: unknown;
   headers?: Record<string, string>;
   fetchImpl?: typeof fetch;
@@ -136,6 +143,28 @@ export const listJobs = (id: string): Promise<Job[]> =>
   request(API_PATHS.projectJobs(id), z.array(jobSchema));
 export const listAssets = (id: string): Promise<Asset[]> =>
   request(API_PATHS.projectAssets(id), z.array(assetSchema));
+export const getTimeline = (id: string): Promise<StoredTimeline> =>
+  request(API_PATHS.projectTimeline(id), storedTimelineSchema);
+export const saveTimeline = (
+  id: string,
+  baseRevision: number,
+  timeline: Timeline,
+): Promise<StoredTimeline> =>
+  request(API_PATHS.projectTimeline(id), storedTimelineSchema, {
+    method: "PUT",
+    body: { base_revision: baseRevision, timeline },
+  });
+export const listTimelineRevisions = (id: string): Promise<TimelineRevision[]> =>
+  request(API_PATHS.projectTimelineRevisions(id), z.array(timelineRevisionSchema));
+export const restoreTimelineRevision = (
+  id: string,
+  revision: number,
+  baseRevision: number,
+): Promise<StoredTimeline> =>
+  request(API_PATHS.projectTimelineRestore(id, revision), storedTimelineSchema, {
+    method: "POST",
+    body: { base_revision: baseRevision },
+  });
 export const listProviders = (): Promise<ProviderStatus[]> =>
   request(API_PATHS.providers, z.array(providerStatusSchema));
 export const getProviderCosts = (): Promise<ProviderCosts> =>

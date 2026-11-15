@@ -44,6 +44,9 @@ Browser (apps/studio)  ──/api/v1──▶  Worker (workers/api)  ──▶  
   completes. `POST /projects/:id/generate` and `/cancel` drive it; the project page shows live
   steps, errors and the storyboard. See `AGENTS.md`.
 
+- Timeline editor (`apps/studio/src/editor`): typed commands, undo/redo, autosave and recovery
+  over the persisted timeline (ADR 043, 045).
+
 - Media providers (`src/providers`): FLUX schnell images on Workers AI (narration is voiced in the browser), behind
   a registry with priorities, daily caps, health and fallback. Each scene's media is stored in R2
   and served to its owner. See `PROVIDERS.md`.

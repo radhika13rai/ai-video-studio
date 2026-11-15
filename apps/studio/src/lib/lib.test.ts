@@ -11,6 +11,7 @@ describe("matchRoute", () => {
     ["/projects/new", { name: "new" }],
     ["/projects/abc-123", { name: "project", id: "abc-123" }],
     ["/status", { name: "status" }],
+    ["/projects/abc/edit", { name: "edit", id: "abc" }],
     ["/nope", { name: "not-found" }],
     ["/projects/a/b", { name: "not-found" }],
   ])("%s", (path, expected) => {

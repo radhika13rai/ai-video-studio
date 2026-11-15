@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.11.0 (2026-11-15)
+
+- Timeline editor (E3), at `/projects/:id/edit` ("Edit video" on the project page once the
+  media is made): scenes as clips sized by length with voice, text, sound and music lanes;
+  drag to reorder (long-press on a phone) or Move left/right; drag the right edge or use the
+  slider to change length; duplicate and delete; per-scene transition, length, camera, shot,
+  framing, footage trim, narration text, voice, speed and level, caption, label, text overlays
+  and sound effects; captions, music and transition sounds for the whole video; aspect ratio.
+- Undo and redo (100 steps; typing and dragging merge into one step; Ctrl/⌘+Z, Shift+Ctrl/⌘+Z).
+- Autosave: on this device after 0.3 s, to the server 2 s after the last edit; offline edits are
+  kept and retried; unsaved edits from an earlier visit can be restored; when another tab or
+  device saved first, choose to keep yours or load theirs; earlier versions can be restored.
+
 ## 1.10.0 (2026-11-15)
 
 - Renderer editor features (E2): text overlays with presets and entrance animations, caption

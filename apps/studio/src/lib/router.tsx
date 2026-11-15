@@ -29,6 +29,7 @@ export type Route =
   | { name: "projects" }
   | { name: "new" }
   | { name: "project"; id: string }
+  | { name: "edit"; id: string }
   | { name: "status" }
   | { name: "not-found" };
 
@@ -37,6 +38,8 @@ export function matchRoute(path: string): Route {
   if (p === "/" || p === "/projects") return { name: "projects" };
   if (p === "/projects/new") return { name: "new" };
   if (p === "/status") return { name: "status" };
+  const e = /^\/projects\/([^/]+)\/edit$/.exec(p);
+  if (e?.[1]) return { name: "edit", id: decodeURIComponent(e[1]) };
   const m = /^\/projects\/([^/]+)$/.exec(p);
   if (m?.[1]) return { name: "project", id: decodeURIComponent(m[1]) };
   return { name: "not-found" };
