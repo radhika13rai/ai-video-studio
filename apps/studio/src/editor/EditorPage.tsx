@@ -11,6 +11,7 @@ import {
   listTimelineRevisions,
   restoreTimelineRevision,
 } from "../services/api";
+import type { EditorCommand } from "./commands";
 import type { DraftStore } from "./drafts";
 import { Inspector } from "./Inspector";
 import { TimelineView, type InspectorTab } from "./TimelineView";
@@ -30,7 +31,7 @@ const ZOOMS = [12, 20, 32, 48];
 
 export function EditorPage({ id, store }: { id: string; store?: DraftStore }) {
   const editor = useTimelineEditor(id, store ? { store } : {});
-  const { state, undo, redo } = editor;
+  const { state, undo, redo, dispatch: applyEdit } = editor;
   const [project, setProject] = useState<Project | null>(null);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -51,11 +52,11 @@ export function EditorPage({ id, store }: { id: string; store?: DraftStore }) {
   const clip = t?.clips[index] ?? null;
   // Edits keep the selection on the same scene, wherever it moves.
   const dispatch = useCallback(
-    (cmd: Parameters<typeof editor.dispatch>[0]) => {
+    (cmd: EditorCommand) => {
       if (clip && selectedId !== clip.id) setSelectedId(clip.id);
-      return editor.dispatch(cmd);
+      return applyEdit(cmd);
     },
-    [clip, selectedId, editor],
+    [clip, selectedId, applyEdit],
   );
 
   const select = useCallback(
