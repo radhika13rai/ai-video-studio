@@ -1,4 +1,4 @@
-import type { AspectRatio } from "@avs/types";
+import type { AspectRatio, CameraMove, SceneTransition, ShotSize } from "@avs/types";
 import type { RenderManifest } from "@avs/schemas";
 
 /** Pure timing and layout maths. No browser APIs, so it is unit-tested in Node. */
@@ -126,6 +126,8 @@ export function motionFor(index: number): Motion {
  * renderer turns into parallax.
  */
 export interface Shot extends Motion {
+  /** Handheld-style drift strength (1 = normal). */
+  drift?: number;
   startFrame: number; // relative to the scene
   frameCount: number;
   camera: [number, number];
@@ -145,13 +147,81 @@ export function hash01(...n: number[]): number {
   return ((h >>> 0) % 100000) / 100000;
 }
 
-export function shotsFor(sceneIndex: number, frameCount: number, fps = FPS): Shot[] {
+/** How much of the picture each shot size shows (1 = whole picture). */
+const SHOT_ZOOM: Record<ShotSize, number> = {
+  wide: 1.02,
+  medium: 1.15,
+  close: 1.32,
+  extreme_close: 1.55,
+  overhead: 1.12,
+  pov: 1.2,
+};
+
+/** A planned camera move turned into zoom, pan and parallax for one shot. */
+export function cameraMotion(
+  camera: CameraMove,
+  base: number,
+  focus: { x: number; y: number } = { x: 0, y: 0 },
+): Omit<Shot, "startFrame" | "frameCount"> {
+  const at = (
+    zoomFrom: number,
+    zoomTo: number,
+    panX: [number, number],
+    panY: [number, number],
+    cam: [number, number],
+    drift = 1,
+  ) => ({
+    zoomFrom,
+    zoomTo,
+    panX: [panX[0] + focus.x, panX[1] + focus.x] as [number, number],
+    panY: [panY[0] + focus.y, panY[1] + focus.y] as [number, number],
+    camera: cam,
+    drift,
+  });
+  switch (camera) {
+    case "static":
+      return at(base, base, [0, 0], [0, 0], [0, 0], 0.35);
+    case "push_in":
+      return at(base, base + 0.2, [0, 0], [0.05, -0.05], [-0.3, 0.3]);
+    case "pull_out":
+      return at(base + 0.2, base, [0, 0], [-0.05, 0.05], [0.3, -0.3]);
+    case "pan_left":
+      return at(base + 0.1, base + 0.1, [0.55, -0.55], [0, 0], [1, -1]);
+    case "pan_right":
+      return at(base + 0.1, base + 0.1, [-0.55, 0.55], [0, 0], [-1, 1]);
+    case "tilt_up":
+      return at(base + 0.1, base + 0.12, [0, 0], [0.55, -0.55], [0, 0]);
+    case "tilt_down":
+      return at(base + 0.1, base + 0.12, [0, 0], [-0.55, 0.55], [0, 0]);
+    case "orbit":
+      return at(base + 0.06, base + 0.14, [-0.4, 0.4], [0.05, -0.05], [-1.4, 1.4]);
+    case "handheld":
+      return at(base + 0.04, base + 0.1, [-0.1, 0.1], [0, 0], [-0.4, 0.4], 2.2);
+  }
+}
+
+export function shotsFor(
+  sceneIndex: number,
+  frameCount: number,
+  fps = FPS,
+  direction: { shot?: ShotSize | undefined; camera?: CameraMove | undefined } = {},
+): Shot[] {
   const count = Math.max(1, Math.min(4, Math.round(frameCount / (SHOT_SECONDS * fps))));
   const shots: Shot[] = [];
   let start = 0;
   for (let k = 0; k < count; k++) {
     const end = k === count - 1 ? frameCount : Math.round(((k + 1) * frameCount) / count);
     const r = (i: number) => hash01(sceneIndex, k, i);
+    const frames = { startFrame: start, frameCount: Math.max(1, end - start) };
+    start = end;
+    if (direction.camera) {
+      // Planned direction: the first shot uses the planned size; later shots punch in closer
+      // on another part of the picture, all with the planned camera move.
+      const base = SHOT_ZOOM[direction.shot ?? "medium"] + (k > 0 ? 0.2 + r(1) * 0.15 : 0);
+      const focus = k > 0 ? { x: (r(3) - 0.5) * 1.2, y: (r(4) - 0.5) * 0.8 } : { x: 0, y: 0 };
+      shots.push({ ...frames, ...cameraMotion(direction.camera, base, focus) });
+      continue;
+    }
     const dir = (sceneIndex + k) % 2 === 0 ? 1 : -1;
     // First shot of a scene is the wide establishing shot; later ones punch in on a region.
     const close = k > 0;
@@ -161,15 +231,13 @@ export function shotsFor(sceneIndex: number, frameCount: number, fps = FPS): Sho
     const focusY = close ? (r(4) - 0.5) * 0.9 : 0;
     const zoomIn = (sceneIndex + k) % 3 !== 2;
     shots.push({
-      startFrame: start,
-      frameCount: Math.max(1, end - start),
+      ...frames,
       zoomFrom: zoomIn ? zoomBase : zoomBase + push,
       zoomTo: zoomIn ? zoomBase + push : zoomBase,
       panX: [focusX - 0.25 * dir, focusX + 0.25 * dir],
       panY: [focusY + 0.1, focusY - 0.1],
       camera: [-dir, dir],
     });
-    start = end;
   }
   return shots;
 }
@@ -201,13 +269,15 @@ export function transitionAt(timeline: TimedScene[], frame: number): Transition 
   for (let i = 1; i < timeline.length; i++) {
     const to = timeline[i] as TimedScene;
     const from = timeline[i - 1] as TimedScene;
+    const planned: SceneTransition | undefined = to.scene.transition_in;
+    if (planned === "cut") continue; // a planned hard cut: no blend
     const span = Math.min(half, from.frameCount / 3, to.frameCount / 3);
     if (frame >= to.startFrame - span && frame < to.startFrame + span) {
       return {
         from,
         to,
         progress: (frame - (to.startFrame - span)) / (2 * span),
-        kind: TRANSITIONS[(i - 1) % TRANSITIONS.length] as TransitionKind,
+        kind: planned ?? (TRANSITIONS[(i - 1) % TRANSITIONS.length] as TransitionKind),
       };
     }
   }

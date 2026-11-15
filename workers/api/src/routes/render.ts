@@ -25,6 +25,7 @@ import { ApiError } from "../lib/errors";
 import { jsonOk } from "../lib/http";
 import { readJson } from "../lib/request";
 import type { Router } from "../lib/router";
+import { productionBlueprintSchema } from "../creative/blueprint";
 import { inspectMp4, r2Reader } from "../quality/mp4";
 import { RENDER_EVENT } from "../workflows/production-workflow";
 import type { Ctx } from "./projects";
@@ -92,6 +93,11 @@ export function registerRenderRoutes(router: Router<Ctx>): void {
       (a) => !runPrefix || a.storage_key.startsWith(runPrefix),
     );
     const url = (assetId: string) => API_PATHS.assetContent(projectId, assetId);
+    // The Creative Director's direction, when this project has a valid blueprint.
+    const blueprint = productionBlueprintSchema.safeParse(project.production_config.blueprint);
+    const direction = new Map(
+      blueprint.success ? blueprint.data.scenes.map((s) => [s.scene_number, s]) : [],
+    );
     let start = 0;
     const scenes = (await listScenes(db, user.id, projectId)).map((s) => {
       const image = assets.find((a) => a.scene_id === s.id && a.asset_type === "image");
@@ -105,6 +111,17 @@ export function registerRenderRoutes(router: Router<Ctx>): void {
         narration: (s.voiceover ?? "").trim() || null,
         image_url: image ? url(image.id) : null,
         voice_url: voice ? url(voice.id) : null,
+        ...(() => {
+          const d = direction.get(s.scene_number);
+          return d
+            ? {
+                shot: d.shot,
+                camera: d.camera,
+                transition_in: d.transition_in,
+                on_screen_text: d.on_screen_text,
+              }
+            : {};
+        })(),
       };
       start += s.duration_seconds;
       return scene;
@@ -125,6 +142,9 @@ export function registerRenderRoutes(router: Router<Ctx>): void {
       },
       scenes,
       fallbacks,
+      ...(blueprint.success
+        ? { music: { mood: blueprint.data.music.mood, tempo_bpm: blueprint.data.music.tempo_bpm } }
+        : {}),
     };
     return jsonOk(manifest);
   });

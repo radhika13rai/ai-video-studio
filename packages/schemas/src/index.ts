@@ -1,6 +1,10 @@
 import {
   ASPECT_RATIOS,
   ASSET_TYPES,
+  CAMERA_MOVES,
+  MUSIC_MOODS,
+  SCENE_TRANSITIONS,
+  SHOT_SIZES,
   PROVIDER_CAPABILITIES,
   PROVIDER_HEALTH_STATUSES,
   QUALITY_STATUSES,
@@ -221,6 +225,11 @@ export const renderManifestSchema = z.object({
         caption: z.string(),
         /** Text to speak (null for silent scenes). The browser voices it with Kokoro. */
         narration: z.string().nullable().optional(),
+        /** Creative Director direction (absent for projects planned before it existed). */
+        shot: z.enum(SHOT_SIZES).optional(),
+        camera: z.enum(CAMERA_MOVES).optional(),
+        transition_in: z.enum(SCENE_TRANSITIONS).optional(),
+        on_screen_text: z.string().max(80).nullable().optional(),
         image_url: z.string().nullable(),
         voice_url: z.string().nullable(),
       }),
@@ -228,6 +237,10 @@ export const renderManifestSchema = z.object({
     .min(1)
     .max(LIMITS.maxProjectScenes),
   fallbacks: z.array(z.string()),
+  /** Background music direction from the blueprint (absent: the default track). */
+  music: z
+    .object({ mood: z.enum(MUSIC_MOODS), tempo_bpm: z.number().int().min(60).max(140) })
+    .optional(),
 });
 export type RenderManifest = z.infer<typeof renderManifestSchema>;
 

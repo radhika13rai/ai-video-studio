@@ -232,7 +232,7 @@ export async function renderVideo(
         maxSeconds: t.frameCount / FPS,
       })),
       durationSeconds,
-      { music: opts.music !== false },
+      { music: opts.music === false ? false : (manifest.music ?? true) },
     );
     report({ stage: "audio", progress: 1 });
 
