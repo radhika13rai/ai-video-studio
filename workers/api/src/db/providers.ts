@@ -18,6 +18,9 @@ interface ProviderRow {
   priority: number;
   health_status: string;
   quota_metadata: string;
+  consecutive_failures: number;
+  cooldown_until: string | null;
+  last_error: string | null;
   updated_at: string;
 }
 
@@ -29,6 +32,10 @@ export interface Provider {
   priority: number;
   health_status: ProviderHealthStatus;
   quota: JsonObject;
+  /** Circuit breaker state (ADR 040). */
+  consecutive_failures: number;
+  cooldown_until: string | null;
+  last_error: string | null;
   updated_at: string;
 }
 
@@ -41,6 +48,9 @@ function toProvider(r: ProviderRow): Provider {
     priority: r.priority,
     health_status: z.enum(PROVIDER_HEALTH_STATUSES).parse(r.health_status),
     quota: fromJson(jsonObject, r.quota_metadata, "quota_metadata"),
+    consecutive_failures: r.consecutive_failures ?? 0,
+    cooldown_until: r.cooldown_until ?? null,
+    last_error: r.last_error ?? null,
     updated_at: r.updated_at,
   };
 }
@@ -126,4 +136,75 @@ export async function setProviderHealth(
     .bind(health, nowIso(), providerName, capability)
     .run();
   if (res.meta.changes === 0) throw notFound("provider");
+}
+
+/** Failures in a row before a provider is marked down and paused. */
+export const FAILURES_BEFORE_DOWN = 3;
+const BASE_COOLDOWN_MS = 5 * 60_000;
+const MAX_COOLDOWN_MS = 60 * 60_000;
+
+/** Pause after `failures` failures in a row: 5 min at the threshold, doubling, at most 1 h. */
+export function cooldownMs(failures: number): number {
+  if (failures < FAILURES_BEFORE_DOWN) return 0;
+  return Math.min(MAX_COOLDOWN_MS, BASE_COOLDOWN_MS * 2 ** (failures - FAILURES_BEFORE_DOWN));
+}
+
+/** A successful call: healthy, failure count and pause cleared. */
+export async function recordProviderSuccess(
+  db: D1Database,
+  providerName: string,
+  capability: ProviderCapability,
+): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE providers SET health_status = 'healthy', consecutive_failures = 0,
+         cooldown_until = NULL, last_error = NULL, updated_at = ?
+       WHERE provider_name = ? AND capability = ?`,
+    )
+    .bind(nowIso(), providerName, capability)
+    .run();
+}
+
+/**
+ * A failed call. `pauseUntil` (quota, refused key) pauses the provider without counting a
+ * failure; otherwise the failure count goes up in one atomic update, the provider is degraded,
+ * and at FAILURES_BEFORE_DOWN it is marked down and paused (circuit breaker).
+ */
+export async function recordProviderFailure(
+  db: D1Database,
+  providerName: string,
+  capability: ProviderCapability,
+  failure: { message: string; pauseUntil?: string; countsAsFailure: boolean },
+  now = new Date(),
+): Promise<void> {
+  const message = failure.message.slice(0, 300);
+  if (!failure.countsAsFailure) {
+    await db
+      .prepare(
+        `UPDATE providers SET last_error = ?, cooldown_until = ?, updated_at = ?
+         WHERE provider_name = ? AND capability = ?`,
+      )
+      .bind(message, failure.pauseUntil ?? null, now.toISOString(), providerName, capability)
+      .run();
+    return;
+  }
+  const row = await db
+    .prepare(
+      `UPDATE providers SET consecutive_failures = consecutive_failures + 1, last_error = ?,
+         updated_at = ?
+       WHERE provider_name = ? AND capability = ? RETURNING consecutive_failures`,
+    )
+    .bind(message, now.toISOString(), providerName, capability)
+    .first<{ consecutive_failures: number }>();
+  const n = row?.consecutive_failures ?? 1;
+  const pause = cooldownMs(n);
+  const until =
+    failure.pauseUntil ?? (pause > 0 ? new Date(now.getTime() + pause).toISOString() : null);
+  await db
+    .prepare(
+      `UPDATE providers SET health_status = ?, cooldown_until = ?
+       WHERE provider_name = ? AND capability = ?`,
+    )
+    .bind(n >= FAILURES_BEFORE_DOWN ? "down" : "degraded", until, providerName, capability)
+    .run();
 }

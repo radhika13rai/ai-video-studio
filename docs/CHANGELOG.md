@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.6.0 (2026-11-15)
+
+- Capability-aware providers: seven separate capabilities (text, image, video, image-to-video,
+  voice, music, sound effects); a provider serves only what it declares, so an image model can
+  never stand in for video.
+- Every provider declares its tier (free or paid), cost model, limits, time limit, key name and
+  commercial-use terms. Routing skips providers that can't take the request, lack their key, are
+  paused, are at their daily cap, or (paid) would pass the budget; then orders by health,
+  priority and estimated cost.
+- Each call has a time limit. Three failures in a row pause a provider (5 minutes, doubling up to
+  an hour); running out of allowance pauses it until the allowance resets.
+- Paid providers stay off unless switched on with a daily budget; each paid call reserves its
+  estimated cost atomically. Usage records estimated and actual cost.
+- Long-running provider jobs (submit, then poll, with a deadline) and a workflow helper that waits
+  between polls and falls over to the next provider.
+- Status page: provider tier, price and pause state, and a generation-costs card
+  (`GET /providers/costs`).
+
 ## 1.5.1 (2026-11-15)
 
 - Removed the SDXL-Lightning image model and the MeloTTS server voice: Cloudflare retires both on

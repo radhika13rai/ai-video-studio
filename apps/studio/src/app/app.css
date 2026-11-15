@@ -624,6 +624,9 @@ h3 {
   color: var(--bad);
   margin: 0;
 }
+.warn {
+  color: var(--warn);
+}
 .small {
   font-size: 13px;
   margin-top: 12px;

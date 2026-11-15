@@ -253,3 +253,22 @@ is registered, and the renderer reports voiced/total narrated scenes with the up
 assets. **Why:** the only Workers AI replacement voice (Deepgram Aura) is metered per character,
 Kokoro already voices the final video and sounds better, and the owner chose the free option.
 Existing registry rows for the removed providers stay in D1 and are ignored.
+
+## 040. Capability-aware provider routing with budgets, breaker and long jobs (2026-11-15)
+
+Media capabilities are separate types (`image`, `video`, `image_to_video`, `voice`, `music`,
+`sfx`) with one typed request each; a provider declares one capability plus its facts (tier,
+cost model, limits, time limit, secret name, commercial use, sync or async). `planRoute` is a
+pure function that filters (enabled, supports the request, key set, not paused, under its daily
+cap, paid allowed and within budget) and orders (health, priority, estimated cost). Calls run
+under `withTimeout`. Circuit breaker in `providers`: three consecutive failures mark a provider
+down and pause it (5 min × 2ⁿ, max 1 h); quota errors pause until `retryAt` (Workers AI: next
+00:00 UTC) without counting as failures; a refused key pauses for an hour; any success resets.
+Paid calls reserve their estimate with one conditional INSERT (atomic against both budgets),
+settled with the actual cost or released on failure. Async providers use `provider_jobs`
+(idempotent per job key, terminal states are final, deadline → timed out) driven by
+`runMediaJob`, which uses `step.sleep` between polls and caps polls per attempt.
+**Why:** the old registry knew two capabilities, had no time limits, kept a failing provider
+"degraded" forever, recorded every cost as $0 and had no way to keep paid providers in check or
+to wait for multi-minute video jobs. Keeping routing pure and the facts in code makes each
+provider replaceable and testable without a vendor.

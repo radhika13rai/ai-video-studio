@@ -75,7 +75,28 @@ export type QualityStatus = (typeof QUALITY_STATUSES)[number];
 export const PROVIDER_HEALTH_STATUSES = ["unknown", "healthy", "degraded", "down"] as const;
 export type ProviderHealthStatus = (typeof PROVIDER_HEALTH_STATUSES)[number];
 
-export const PROVIDER_CAPABILITIES = ["text", "image", "video", "voice", "music"] as const;
+export const PROVIDER_CAPABILITIES = [
+  "text",
+  "image",
+  "video",
+  "image_to_video",
+  "voice",
+  "music",
+  "sfx",
+] as const;
+
+export const PROVIDER_TIERS = ["free", "paid"] as const;
+export type ProviderTier = (typeof PROVIDER_TIERS)[number];
+
+export const PROVIDER_JOB_STATUSES = [
+  "submitted",
+  "running",
+  "succeeded",
+  "failed",
+  "timed_out",
+  "cancelled",
+] as const;
+export type ProviderJobStatus = (typeof PROVIDER_JOB_STATUSES)[number];
 export type ProviderCapability = (typeof PROVIDER_CAPABILITIES)[number];
 
 export const ASSET_TYPES = [

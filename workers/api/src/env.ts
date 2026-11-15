@@ -14,6 +14,12 @@ export interface Env {
   AI_TEXT_PROVIDER?: string;
   /** "workers-ai" (default) or "none" to disable image and voice generation. */
   AI_MEDIA_PROVIDER?: string;
+  /** "on" lets paid providers run (still only within the budgets below). Default off. */
+  PAID_PROVIDERS?: string;
+  /** Most all paid generation may cost per UTC day, in USD (default 0 = none). */
+  PAID_DAILY_BUDGET_USD?: string;
+  /** Most one user's paid generation may cost per UTC day, in USD (default: the daily budget). */
+  PAID_USER_DAILY_BUDGET_USD?: string;
   /** Delay between retries of AI steps, e.g. "10 seconds" (default). Tests shorten it. */
   WORKFLOW_RETRY_DELAY?: string;
   /** Optional override of the Workers AI text model id. */

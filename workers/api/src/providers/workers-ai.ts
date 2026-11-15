@@ -1,6 +1,7 @@
 import type { AspectRatio } from "@avs/types";
 import { sniffMedia, toBytes } from "./media-bytes";
-import { ProviderError, type MediaProvider, type MediaRequest, type MediaResult } from "./types";
+import { nextUtcMidnight } from "./policy";
+import { ProviderError, type MediaResult, type RequestFor, type SyncMediaProvider } from "./types";
 
 interface AiBinding {
   run(model: string, inputs: Record<string, unknown>): Promise<unknown>;
@@ -16,6 +17,7 @@ function classify(provider: string, err: unknown): ProviderError {
       "Workers AI daily free allowance is used up.",
       "quota",
       false,
+      nextUtcMidnight(), // the free allocation resets at 00:00 UTC
     );
   return new ProviderError(provider, `request failed: ${msg.slice(0, 200)}`, "unavailable", true);
 }
@@ -49,16 +51,31 @@ async function runMedia(
 const VISUAL_SUFFIX = "high detail, professional photography, no text, no watermark, no logos";
 
 /** FLUX.1 schnell: best prompt-following of the free models in testing. Square 1024×1024 only. */
-export class WorkersAiFluxImage implements MediaProvider {
+export class WorkersAiFluxImage implements SyncMediaProvider<"image"> {
   readonly name = "workers-ai-flux";
   readonly capability = "image" as const;
+  readonly mode = "sync" as const;
+  readonly tier = "free" as const;
+  /**
+   * 1024² at 4 steps = 4 tiles × $0.0000528 + 4 steps × $0.0001056. Charged only beyond the free
+   * 10,000 neurons a day (Workers Paid); on the Free plan the call fails with a quota error.
+   */
+  readonly cost = {
+    unit: "image" as const,
+    usd_per_unit: 0.000634,
+    source: "Workers AI pricing for flux-1-schnell (beyond the free daily allocation)",
+  };
+  readonly limits = { max_prompt_chars: 2048 };
+  readonly timeoutMs = 60_000;
+  readonly credential = null;
+  readonly commercialUse = true;
   readonly defaultDailyLimit = 60;
   readonly defaultPriority = 10;
   static readonly MODEL = "@cf/black-forest-labs/flux-1-schnell";
   constructor(private readonly ai: AiBinding) {}
 
-  async generate(req: MediaRequest): Promise<MediaResult> {
-    if (req.capability !== "image")
+  async generate(req: RequestFor<"image">): Promise<MediaResult> {
+    if ((req as { capability: string }).capability !== "image")
       throw new ProviderError(this.name, "only makes images", "unsupported", false);
     const r = await runMedia(
       this.name,

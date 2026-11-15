@@ -1,7 +1,7 @@
 import { API_PATHS, RENDER_ATTEMPT_HEADER } from "@avs/contracts";
 import { env, introspectWorkflow, SELF } from "cloudflare:test";
 import { afterEach, describe, expect, it } from "vitest";
-import { setTextModelOverride } from "./helpers";
+import { fakeFacts, setTextModelOverride } from "./helpers";
 import { listAssets, listJobs, listScenes, requireProject, upsertUserByEmail } from "../src/db";
 import { sniffMedia } from "../src/providers/media-bytes";
 import { setMediaProvidersOverride } from "../src/providers/registry";
@@ -317,6 +317,7 @@ function provider(
   behave: () => Uint8Array | Error,
 ): MediaProvider & { calls: number } {
   const p = {
+    ...fakeFacts(),
     name: `${capability}-${crypto.randomUUID().slice(0, 6)}`,
     capability,
     defaultPriority: 10,
@@ -485,7 +486,10 @@ describe("quality report and scene retry in production", () => {
         .map((a) => a.id)
         .sort();
 
-      quota = false; // quota is back
+      quota = false; // quota is back: the allowance reset, so the provider's pause has ended
+      await env.DB.prepare("UPDATE providers SET cooldown_until = NULL WHERE provider_name = ?")
+        .bind(image.name)
+        .run();
       const callsBefore = image.calls;
       const res = await call(API_PATHS.sceneRetryMedia(projectId, scenes[1]!.id), {
         method: "POST",
