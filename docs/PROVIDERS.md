@@ -38,12 +38,13 @@ an account and the `AI` binding is unavailable. With `wrangler login` done, `pnp
 `MediaProvider.generate(request)` returns bytes plus their sniffed type, size or duration, and usage
 units. It throws `ProviderError` (`quota`, `unavailable`, `bad_response`, `unsupported`).
 
-| Capability | Provider (registry name) | Model                                              | Order | Daily cap* | Notes                                                                                                                 |
-| ---------- | ------------------------ | -------------------------------------------------- | ----- | ---------- | --------------------------------------------------------------------------------------------------------------------- |
-| image      | `workers-ai-flux`        | `@cf/black-forest-labs/flux-1-schnell` (4 steps)   | 1     | 60         | Best prompt-following in testing. Square 1024², so 9:16 is cropped by the renderer; prompts ask for a centred subject |
-| voice      | none                     | –                                                  | –     | –          | Voiced by Kokoro in the browser at render time (ADR 033, 039)                                                         |
-| video      | `pexels-video`           | Pexels video search (stock footage, not generated) | 1     | 400        | Free with a key (`PEXELS_API_KEY` secret); 200 requests/hour, 20,000/month. Video-style projects only (ADR 041)       |
-| music      | none                     | –                                                  | –     | –          | Not integrated                                                                                                        |
+| Capability     | Provider (registry name) | Model                                               | Order | Daily cap* | Notes                                                                                                                           |
+| -------------- | ------------------------ | --------------------------------------------------- | ----- | ---------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| image          | `workers-ai-flux`        | `@cf/black-forest-labs/flux-1-schnell` (4 steps)    | 1     | 60         | Best prompt-following in testing. Square 1024², so 9:16 is cropped by the renderer; prompts ask for a centred subject           |
+| image_to_video | `fal-wan25-i2v` (paid)   | fal.ai `fal-ai/wan-25-preview/image-to-video`, 720p | 1     | 40         | **Off by default.** $0.10/s of output (5 or 10 s clips); needs `PAID_PROVIDERS=on`, a budget and the `FAL_KEY` secret (ADR 042) |
+| voice          | none                     | –                                                   | –     | –          | Voiced by Kokoro in the browser at render time (ADR 033, 039)                                                                   |
+| video          | `pexels-video`           | Pexels video search (stock footage, not generated)  | 1     | 400        | Free with a key (`PEXELS_API_KEY` secret); 200 requests/hour, 20,000/month. Video-style projects only (ADR 041)                 |
+| music          | none                     | –                                                   | –     | –          | Not integrated                                                                                                                  |
 
 \*Our own safety caps, stored in `providers.quota_metadata.daily_limit` and editable in D1. They
 are not Cloudflare's numbers; the real free-tier limit (Neurons per day) still applies and surfaces
@@ -143,6 +144,22 @@ To switch it on, add the free key as a Worker secret (Cloudflare dashboard → W
 Worker → Settings → Variables and Secrets → add `PEXELS_API_KEY` as a secret, or
 `wrangler secret put PEXELS_API_KEY`). Without it the provider is listed as "Needs the
 PEXELS_API_KEY secret" and never called.
+
+### Paid image-to-video (fal.ai), off by default
+
+When switched on, video-style projects animate each generated image into a 5 or 10 second clip
+with Wan 2.5 on fal.ai ($0.10 per second at 720p, so $0.50–$1.00 per scene). It runs as a
+long-running job (`runMediaJob`: submit with the image as a data URI, `step.sleep`, poll
+`<response_url>/status`, fetch the result, download the MP4 only from fal hosts, check it).
+Each job reserves its estimate within the paid budget first; a failed or timed-out job releases
+it. The image stays as the scene's fallback. Stock footage (free) is still tried first; only
+scenes that ended up with a generated image are animated.
+
+To switch it on, all three are needed: the `FAL_KEY` Worker secret, `PAID_PROVIDERS` set to
+`on`, and `PAID_DAILY_BUDGET_USD` above 0 (both in `wrangler.jsonc` vars). Until then it shows
+"Paid generation is switched off" and is never called. **Not yet run against the live fal API**
+(no key in development); the protocol follows fal's queue documentation and is covered by tests
+with a scripted fetch.
 
 ### Switches
 

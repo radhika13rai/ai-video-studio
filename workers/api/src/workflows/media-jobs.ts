@@ -29,7 +29,8 @@ export async function runMediaJob(
   step: JobSteps,
   ctx: { db: D1Database; env: Env; owner: Owner },
   name: string,
-  request: MediaRequest,
+  /** The request, or a builder run inside the submit step (e.g. to read an image from R2). */
+  request: MediaRequest | (() => Promise<MediaRequest>),
   /** Stores the finished media (e.g. in R2) and returns its storage key. */
   store: (result: MediaResult, jobId: string) => Promise<string>,
 ): Promise<JobOutcome> {
@@ -43,7 +44,7 @@ export async function runMediaJob(
           ctx.env,
           ctx.owner,
           `${name}:${attempt}`,
-          request,
+          typeof request === "function" ? await request() : request,
           new Set(tried),
         );
         return { ok: true as const, job_id: job.id, provider: job.provider_name };

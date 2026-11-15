@@ -284,3 +284,15 @@ per frame. Transition effects are synthesized in the mix. **Why:** no free gener
 is reliable enough (ADR 040's research), and real footage is the free way to get true motion;
 Freesound was rejected because its API is non-commercial only, and synthesized effects need no
 licence at all.
+
+## 042. Paid image-to-video through fal.ai, built switched off (2026-11-15)
+
+`FalWanImageToVideo` is an async, paid `image_to_video` provider using fal's queue API (one key
+for many models, per-second billing, no SDK). The workflow animates generated images in
+video-style projects only when `hasCodeProvider(env, "image_to_video")` (decided in a step),
+which requires the key, `PAID_PROVIDERS=on` and a budget above 0; otherwise nothing changes.
+Wan 2.5 at 720p was chosen as the cheapest well-documented option on fal ($0.10/s; Veo 3.1 Fast
+is $0.10–0.12/s but needs a Google Cloud setup, Kling/Seedance prices vary by version). The owner
+approved building it switched off; turning it on is a separate decision. **Why:** the job
+system, budgets and breaker from ADR 040 make a paid, slow provider safe to add, and keeping it
+behind three switches means no money is spent by accident.

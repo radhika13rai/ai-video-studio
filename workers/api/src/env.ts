@@ -16,6 +16,8 @@ export interface Env {
   AI_MEDIA_PROVIDER?: string;
   /** Pexels API key (Worker secret, `wrangler secret put PEXELS_API_KEY`). Enables stock video. */
   PEXELS_API_KEY?: string;
+  /** fal.ai key (Worker secret). Paid image-to-video; also needs PAID_PROVIDERS=on and a budget. */
+  FAL_KEY?: string;
   /** "on" lets paid providers run (still only within the budgets below). Default off. */
   PAID_PROVIDERS?: string;
   /** Most all paid generation may cost per UTC day, in USD (default 0 = none). */
