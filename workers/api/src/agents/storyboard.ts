@@ -30,6 +30,7 @@ const ALLOWED: Record<VisualStyle, SceneVisualType[]> = {
   image: ["image", "text"],
   video: ["video", "image", "text"],
   animation: ["animation", "image", "text"],
+  motion_graphics: ["graphics"],
 };
 
 export interface Storyboard {
@@ -114,8 +115,16 @@ export async function runStoryboard(
     "You are the storyboard artist for short-form social videos.",
     "Split the narration into scenes. Each scene's voiceover is the exact narration spoken during it;",
     "together the voiceovers must cover the whole narration in order, without rewriting it.",
-    "visual_prompt describes one striking, filmable image for an image or video generator:",
-    "subject, setting, lighting, camera angle and mood, with no text overlays, logos or real people's names.",
+    ...(plan.visual_style === "motion_graphics"
+      ? [
+          "This is a motion-graphics explainer: every scene is an animated layout of headlines, cards and",
+          "checklists, not a picture. visual_prompt briefly describes what the layout shows (e.g. a",
+          "checklist of four features); on_screen_text is the scene's 2-5 word headline.",
+        ]
+      : [
+          "visual_prompt describes one striking, filmable image for an image or video generator:",
+          "subject, setting, lighting, camera angle and mood, with no text overlays, logos or real people's names.",
+        ]),
     `Allowed visual_type values: ${ALLOWED[plan.visual_style].join(", ")}.`,
     ...(guidance
       ? [

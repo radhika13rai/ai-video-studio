@@ -1,3 +1,5 @@
+import type { GraphicsTheme } from "@avs/schemas";
+import { isGraphicsScene, paintGraphicsScene } from "./graphics";
 import type { ParallaxRenderer } from "./parallax";
 import {
   activeWords,
@@ -42,6 +44,8 @@ export interface FrameContext {
   grain: CanvasPattern[] | null;
   /** Caption look (default: on, bold, bottom). */
   captions?: CaptionLook;
+  /** The look of graphics scenes (default theme when absent). */
+  graphicsTheme?: GraphicsTheme;
 }
 
 export interface CaptionLook {
@@ -81,20 +85,27 @@ export function paintFrame(ctx: Ctx2D, fc: FrameContext, frame: number): void {
   if (tr) paintTransition(ctx, fc, frame, tr.from, tr.to, tr.progress, tr.kind);
   else paintScene(ctx, fc, current, frame);
 
-  paintVignette(ctx, w, h);
   const media = fc.media[current.index] as SceneMedia;
   const seconds = (frame - current.startFrame) / FPS;
   const look = fc.captions ?? DEFAULT_CAPTIONS;
-  // Text cards always show their words (they are the picture); captions can be switched off.
-  if (!media.image) paintKineticText(ctx, w, h, media.words, seconds);
-  else if (look.enabled) paintCaptions(ctx, w, h, media.words, seconds, look);
-  for (const o of current.scene.overlays ?? []) paintOverlay(ctx, w, h, o, seconds);
-  if (frame < 2.4 * FPS) paintTitle(ctx, w, h, fc.title, frame / FPS);
-  else if (current.scene.on_screen_text)
-    paintLabel(ctx, w, h, current.scene.on_screen_text, seconds);
-  if (current.scene.credit) paintCredit(ctx, w, h, current.scene.credit);
-  paintProgress(ctx, w, h, frame / Math.max(1, fc.totalFrames - 1));
-  if (fc.grain) paintGrain(ctx, w, h, fc.grain, frame);
+  if (isGraphicsScene(current.scene)) {
+    // Graphics scenes (ADR 048): the on-screen text carries the message, so captions only show
+    // when the caption look was set explicitly; no vignette, title, label, progress bar or grain.
+    if (fc.captions?.enabled) paintCaptions(ctx, w, h, media.words, seconds, look);
+    for (const o of current.scene.overlays ?? []) paintOverlay(ctx, w, h, o, seconds);
+  } else {
+    paintVignette(ctx, w, h);
+    // Text cards always show their words (they are the picture); captions can be switched off.
+    if (!media.image) paintKineticText(ctx, w, h, media.words, seconds);
+    else if (look.enabled) paintCaptions(ctx, w, h, media.words, seconds, look);
+    for (const o of current.scene.overlays ?? []) paintOverlay(ctx, w, h, o, seconds);
+    if (frame < 2.4 * FPS) paintTitle(ctx, w, h, fc.title, frame / FPS);
+    else if (current.scene.on_screen_text)
+      paintLabel(ctx, w, h, current.scene.on_screen_text, seconds);
+    if (current.scene.credit) paintCredit(ctx, w, h, current.scene.credit);
+    paintProgress(ctx, w, h, frame / Math.max(1, fc.totalFrames - 1));
+    if (fc.grain) paintGrain(ctx, w, h, fc.grain, frame);
+  }
 
   // Fade in from black at the start and out at the end.
   const fadeIn = 1 - Math.min(1, frame / 12);
@@ -117,6 +128,10 @@ const clampPan = (p: number) => Math.max(-1, Math.min(1, p));
 /** Draws a scene's picture (or text-card background) filling the frame. */
 function paintScene(ctx: Ctx2D, fc: FrameContext, timed: TimedScene, frame: number): void {
   const { width: w, height: h } = fc;
+  if (isGraphicsScene(timed.scene)) {
+    paintGraphicsScene(ctx, w, h, fc.timeline, timed, frame, fc.graphicsTheme);
+    return;
+  }
   const media = fc.media[timed.index] as SceneMedia;
   const local = frame - timed.startFrame;
   if (!media.image) {

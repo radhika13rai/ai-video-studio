@@ -1,3 +1,4 @@
+import { graphicsLayoutSchema, MAX_GRAPHICS_LAYOUT_BYTES, type GraphicsLayout } from "@avs/schemas";
 import { LIMITS, SCENE_STATUSES, SCENE_VISUAL_TYPES, type SceneStatus } from "@avs/types";
 import { z } from "zod";
 import { invalidData, notFound } from "./errors";
@@ -15,7 +16,26 @@ export interface Scene {
   visual_type: (typeof SCENE_VISUAL_TYPES)[number];
   status: SceneStatus;
   created_at: string;
+  /** A graphics scene's layout (ADR 048); null for other scenes or when none was stored. */
+  graphics_layout: GraphicsLayout | null;
 }
+
+type SceneRow = Omit<Scene, "graphics_layout"> & { graphics_layout?: string | null };
+
+/** Stored layout JSON → layout; anything malformed reads as none (the renderer falls back). */
+function parseLayout(text: string | null | undefined): GraphicsLayout | null {
+  if (!text) return null;
+  try {
+    return graphicsLayoutSchema.safeParse(JSON.parse(text)).data ?? null;
+  } catch {
+    return null;
+  }
+}
+
+const toScene = (row: SceneRow): Scene => ({
+  ...row,
+  graphics_layout: parseLayout(row.graphics_layout),
+});
 
 export const sceneInputSchema = z.object({
   scene_number: z.number().int().min(1).max(LIMITS.maxProjectScenes),
@@ -86,8 +106,40 @@ export async function listScenes(
       `SELECT * FROM scenes WHERE project_id = ? AND ${OWNED("project_id")} ORDER BY scene_number`,
     )
     .bind(projectId, userId)
-    .all<Scene>();
-  return results;
+    .all<SceneRow>();
+  return results.map(toScene);
+}
+
+/**
+ * Stores graphics layouts by scene number (ADR 048). Each must be a valid layout of at most
+ * MAX_GRAPHICS_LAYOUT_BYTES of JSON; null clears a scene's layout.
+ */
+export async function setSceneGraphicsLayouts(
+  db: D1Database,
+  userId: string,
+  projectId: string,
+  items: { scene_number: number; layout: GraphicsLayout | null }[],
+): Promise<void> {
+  await requireProject(db, userId, projectId);
+  const statements = items.map((item) => {
+    let json: string | null = null;
+    if (item.layout !== null) {
+      const parsed = graphicsLayoutSchema.safeParse(item.layout);
+      if (!parsed.success)
+        throw invalidData(
+          `scene ${item.scene_number} layout: ${parsed.error.issues[0]?.message ?? "invalid"}`,
+        );
+      json = JSON.stringify(parsed.data);
+      if (new TextEncoder().encode(json).length > MAX_GRAPHICS_LAYOUT_BYTES)
+        throw invalidData(`scene ${item.scene_number} layout is over 8 KB`);
+    }
+    return db
+      .prepare(
+        `UPDATE scenes SET graphics_layout = ? WHERE project_id = ? AND scene_number = ? AND ${OWNED("project_id")}`,
+      )
+      .bind(json, projectId, item.scene_number, userId);
+  });
+  if (statements.length) await db.batch(statements);
 }
 
 export async function updateSceneStatus(

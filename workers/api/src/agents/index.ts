@@ -10,3 +10,9 @@ export {
 export { normalizeStoryboard, runStoryboard, type Storyboard } from "./storyboard";
 export { AgentError, briefSchema, type AgentResult, type Brief } from "./types";
 export { extractJson, runStructured } from "./structured";
+export {
+  fallbackLayouts,
+  graphicsLayoutInputSchema,
+  runGraphicsLayout,
+  type GraphicsLayoutOutput,
+} from "./graphics-layout";

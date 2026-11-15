@@ -361,3 +361,25 @@ upload, completion, retries and QC are reused unchanged. `production_config.medi
 the run that made the media (set when a run reaches the media stage, or on the first export for
 older projects), so later runs never hide the project's files. **Why:** reusing the workflow
 keeps one render path with its guarantees, and keeping versions makes regeneration safe to try.
+
+## 048. Graphics scenes: deterministic layouts, AI fills the slots (2026-11-15)
+
+Motion-graphics explainers are a new scene type, `graphics`, drawn by the existing Canvas painter
+so the export and the live preview share one code path (ADR 046); no Remotion or other
+React-to-video renderer, no server rendering. **Layouts are code:** eleven presets with
+size-capped text slots (`graphicsLayoutSchema`, a discriminated union on `preset`). Llama on
+Workers AI can't reliably lay out a frame, so the model only picks a preset and fills slots,
+through structured output validated with zod (rule 15); if it is off, out of quota, unreachable
+or returns invalid output, a deterministic fallback maps the beat (hook → `hook_headline`, CTA →
+`cta_card`, objection → `chat_objection`, proof → `checklist`, steps → `card_list`, …) and uses
+the scene's own text, so the step never fails a run. **Persistent objects:** the project's
+`graphics_theme` holds the palette, an anchor object and the mascot; each preset defines their
+pose and they glide between poses on a spring across scenes. **One timing source:** a pure
+`cues(layout, durationFrames)` gives each element's entrance frame and sound; the painter and the
+audio mixer both read it. Briefs asking for motion graphics (keywords) get the `motion_graphics`
+visual style: the storyboard makes only graphics scenes and the media stage generates no image or
+footage for them. The headline font (Lilita One, OFL) is a pinned vendor file loaded with
+FontFace, falling back to bold Inter. **Why:** deterministic layouts are free, instant, testable
+and always fit the safe area; the model adds wording, not geometry. **Limits:** one 9:16
+composition (letterboxed in other aspect ratios); one anchor object (a folder); the theme is set
+to the default for new projects and isn't editable in the UI yet.

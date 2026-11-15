@@ -51,7 +51,7 @@ export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
 export const SCENE_STATUSES = ["pending", "generating", "ready", "failed", "skipped"] as const;
 export type SceneStatus = (typeof SCENE_STATUSES)[number];
 
-export const SCENE_VISUAL_TYPES = ["image", "video", "animation", "text"] as const;
+export const SCENE_VISUAL_TYPES = ["image", "video", "animation", "text", "graphics"] as const;
 export type SceneVisualType = (typeof SCENE_VISUAL_TYPES)[number];
 
 /** `queued` → `running` → `completed` | `failed` | `cancelled`. A failed attempt with retries

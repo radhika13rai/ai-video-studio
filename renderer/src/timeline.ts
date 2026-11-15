@@ -269,7 +269,13 @@ export function transitionAt(timeline: TimedScene[], frame: number): Transition 
   for (let i = 1; i < timeline.length; i++) {
     const to = timeline[i] as TimedScene;
     const from = timeline[i - 1] as TimedScene;
-    const planned: SceneTransition | undefined = to.scene.transition_in;
+    let planned: SceneTransition | undefined = to.scene.transition_in;
+    // Graphics scenes (ADR 048) share one fixed composition: between two of them the elements
+    // fade out and in themselves, so there is no blend; next to a picture scene, only a crossfade.
+    const fromG = from.scene.visual_type === "graphics";
+    const toG = to.scene.visual_type === "graphics";
+    if (fromG && toG) continue;
+    if ((fromG || toG) && planned !== "cut") planned = "crossfade";
     if (planned === "cut") continue; // a planned hard cut: no blend
     const want = to.scene.transition_seconds ? (to.scene.transition_seconds * FPS) / 2 : half;
     const span = Math.max(1, Math.min(want, from.frameCount / 3, to.frameCount / 3));

@@ -51,7 +51,7 @@ Every endpoint except `/health` needs a signed-in user. See `SECURITY.md`.
 | PUT | `/projects/:id/timeline` | `{ base_revision, timeline }` (≤ 256 KB) | The saved timeline (revision + 1); 409 `CONFLICT` if another save came first; 400 on an invalid timeline or a reference outside the project |
 | GET | `/projects/:id/timeline/revisions` | – | Snapshots, newest first: `{ revision, reason, created_at }` |
 | POST | `/projects/:id/timeline/revisions/:rev/restore` | `{ base_revision }` | Restores a snapshot as the newest revision |
-| POST | `/projects/:id/scenes/:sceneId/regenerate` | `{ what: "image" \| "footage", prompt? }` | 201 `{ scene_id, asset }`: a new version (earlier ones kept, at most 3 plus any in use); 502 `GENERATION_FAILED` with the providers' reasons |
+| POST | `/projects/:id/scenes/:sceneId/regenerate` | `{ what: "image" \| "footage", prompt? }` | 201 `{ scene_id, asset }`: a new version (earlier ones kept, at most 3 plus any in use); 502 `GENERATION_FAILED` with the providers' reasons; 409 for a graphics scene (edit its layout in the timeline instead) |
 | POST | `/projects/:id/export` | – | 202: a render-only run for a finished (`completed`, `failed`, `cancelled`) video; the project goes to "Ready to render" with its timeline |
 | GET | `/providers` | – | Every capability with its providers: availability, health, tier, price, pause state, usage today |
 | GET | `/providers/costs` | – | `{ paid: { enabled, daily_budget_usd, user_daily_budget_usd, spent_today_usd, you_spent_today_usd }, today, last_30_days }` |

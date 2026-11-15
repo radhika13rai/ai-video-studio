@@ -7,14 +7,16 @@
 | Package            | Runner                                                                          | What it covers                                                                     |
 | ------------------ | ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
 | `workers/api`      | Vitest in workerd (`@cloudflare/vitest-plugin`) with local D1, R2 and Workflows | Repositories, API, auth, workflow, agents, providers, renderer API, quality checks |
-| `renderer`         | Vitest in Node                                                                  | Timing, captions, cropping, motion, WAV                                            |
+| `renderer`         | Vitest in Node                                                                  | Timing, captions, cropping, motion, WAV, graphics cues and layouts                 |
 | `apps/studio`      | Vitest + happy-dom + Testing Library                                            | Pages, forms, production controls, render panel                                    |
 | `packages/schemas` | Vitest                                                                          | Contracts                                                                          |
 
 AI models are replaced with scripted fakes in tests (`setTextModelOverride`,
 `setMediaProvidersOverride`); real MP4s made by the renderer live in `workers/api/tests/fixtures`.
 Live checks against Workers AI and in a real browser are recorded in `PROVIDERS.md` and
-`RENDERER.md`.
+`RENDERER.md`. Graphics scenes have a browser script, `node renderer/scripts/graphics-fixture.mjs`
+(headless Chromium + ffmpeg; not part of `pnpm check`), that renders the 12-scene fixture and
+checks stills, the safe area, the preview, the MP4 and the sound cues.
 
 ## Blueprint acceptance tests
 

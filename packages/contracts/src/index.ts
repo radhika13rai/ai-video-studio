@@ -81,6 +81,13 @@ export const KOKORO_VOICES = [
 ] as const;
 export type KokoroVoiceId = (typeof KOKORO_VOICES)[number]["id"];
 
+/**
+ * The chunky display font of graphics scenes (ADR 048): Lilita One by Juan Montoreano, SIL Open
+ * Font License 1.1, pinned to a google/fonts commit.
+ */
+export const DISPLAY_FONT_PATH = "fonts/lilita-one/LilitaOne-Regular.ttf";
+const GOOGLE_FONTS_COMMIT = "cc39c4c2c304bc368c9b7c311ea2bcc6013299fe";
+
 const hf = (model: string, revision: string, file: string, sha256: string): VendorFile => ({
   path: `models/${model}/${file}`,
   contentType: file.endsWith(".json") ? "application/json" : "application/octet-stream",
@@ -92,6 +99,15 @@ const hf = (model: string, revision: string, file: string, sha256: string): Vend
 });
 
 export const VENDOR_FILES: VendorFile[] = [
+  {
+    path: DISPLAY_FONT_PATH,
+    contentType: "font/ttf",
+    source: {
+      kind: "url",
+      url: `https://raw.githubusercontent.com/google/fonts/${GOOGLE_FONTS_COMMIT}/ofl/lilitaone/LilitaOne-Regular.ttf`,
+      sha256: "f5b641c45c69d772ee4eda687bc9fda411d5cad6b0b45371491da4580cbc8d59",
+    },
+  },
   ...["ffmpeg-core.js", "ffmpeg-core.wasm"].map((f): VendorFile => ({
     path: `ffmpeg-core/${FFMPEG_CORE_VERSION}/${f}`,
     contentType: f.endsWith(".wasm") ? "application/wasm" : "text/javascript",

@@ -51,6 +51,7 @@ Everything the renderer loads that isn't our own code is listed, pinned, in
 | Kokoro-82M v1.0 ONNX, q8 + tokenizer   | Hugging Face, pinned revision + sha256 | 92 MB       |
 | Kokoro voices `af_heart`, `am_michael` | npm `kokoro-js` 1.2.1                  | 0.5 MB each |
 | Depth Anything V2 Small, q8            | Hugging Face, pinned revision + sha256 | 27 MB       |
+| Lilita One (display font, SIL OFL 1.1) | google/fonts, pinned commit + sha256   | 28 KB       |
 
 - **production:** stored in R2 under `vendor/…` and served by the Worker at `/vendor/…`
   (`immutable`, only paths on the list). `GET /api/v1/health` reports `missing_vendor_files`;
@@ -175,6 +176,47 @@ Verified in headless Chromium: 1.16 s of playback in 1.2 s, seek to 7.16 s, paus
 update to 16:9 rebuilds at 1138×640 with the new length, the cached line counts as voiced, and an
 export with that cache had Kokoro narration without loading the model (3.6 s).
 
+## Graphics scenes (ADR 048)
+
+A scene with `visual_type: "graphics"` draws no picture: it is one of eleven code-defined layout
+presets (`renderer/src/graphics/`), filled from the scene's `graphics` slots and animated on a
+fixed 1080 × 1920 design canvas (fitted to the output size). The style: a light dotted background,
+chunky orange extruded headlines (Lilita One, letters springing in one by one, auto-fitted to
+960 px), white rounded cards, blue connector curves that draw themselves with a dot riding the
+tip, green checks popping in one by one, a persistent glossy folder (the anchor) and a small pixel
+mascot that blinks, hops and points.
+
+| Preset                | Draws                                                                 |
+| --------------------- | --------------------------------------------------------------------- |
+| `hook_headline`       | pill, headline, up to 6 book-cover items floating around the anchor   |
+| `card_list`           | optional headline and up to 6 rows (title + subtitle)                 |
+| `collect_into_anchor` | up to 6 cards with connectors, then they fly into the folder + ripple |
+| `headline_papers`     | headline, papers fanning out of the folder, optional caption pill     |
+| `headline_badge`      | headline, a blue gem, a badge pill                                    |
+| `progress_card`       | card with a label, a counting percentage and a filling bar, then a ✓  |
+| `checklist`           | headline and up to 6 rows, each then checked in order                 |
+| `chat_objection`      | quoted message card, a red label, a "typing…" card                    |
+| `chat_reply`          | a reply card that types itself, then up to 2 tags                     |
+| `stacked_cards`       | up to 5 numbered cards on a blue connector spine                      |
+| `cta_card`            | headline, profile card with handle, button, line and a drawn arrow    |
+
+- **One timing source:** `cues(layout, durationFrames)` (pure) returns every element's entrance
+  frame and its sound. The painter animates from those frames and the mixer puts a sound on each
+  (`click`, `tick`, `confirm`, `impact`, `pop`, `whoosh`, all synthesized), so every sound lands
+  on its animation. Short scenes compress the schedule; every element has entered before the
+  exit fade over the last 7 frames.
+- **Persistent objects:** the project's `graphics_theme` sets the palette, the anchor (`folder`
+  or `none`) and the mascot. Each preset has a pose for both; between two graphics scenes they
+  glide from the old pose to the new one on a critically damped spring instead of being redrawn.
+- **No picture effects:** no depth parallax, punch-ins, title intro, label, vignette, progress bar
+  or grain. Two graphics scenes cut (their elements fade out and in); next to a picture scene the
+  transition is always a crossfade, without a whoosh. Captions are off unless the caption look is
+  set explicitly, because the on-screen text carries the message.
+- **Font:** loaded with the FontFace API from `/vendor/` before the first frame (export and
+  preview); if it fails the headlines use bold Inter and the render notes say so.
+- **Safe area:** text stays between y 220 and 1540 of the design canvas (Instagram's top 220 px
+  and bottom 380 px are kept clear). 16:9 and 1:1 projects show the 9:16 composition centred.
+
 ## Following the Creative Director
 
 When the project has a blueprint, the manifest carries per-scene `shot`, `camera`,
@@ -216,6 +258,15 @@ without them the renderer behaves exactly as before.
 - Browser runs (Playwright + ffprobe) with real Workers AI images and narration in
   `renderer/test-fixtures`: both encoders, frame inspection, audio alignment (voice at 0.05–4.0 s
   and 5.16–9.8 s, silent text card), and a full render → upload → download through the app.
+- Graphics scenes: `renderer/src/graphics/graphics.test.ts` (springs, cues inside the scene and
+  in order, the 12-scene fixture, a sound on every cue, transitions, text fitting) and the browser
+  script `node renderer/scripts/graphics-fixture.mjs`, which renders the 12-scene "Close Deals"
+  fixture (`renderer/src/graphics/fixture.ts`) in headless Chromium at 1080×1920, 30 fps; saves a
+  still at the busiest frame of each scene to `renderer/test-fixtures/graphics/`; fails on
+  text-like pixels in the unsafe top 220 px / bottom 380 px; checks the live preview plays and
+  seeks to the same frame the export paints; and checks the MP4 with ffprobe and its audio
+  around every cue. Last run (2026-11-15): 1044 frames with WebCodecs in 14 s, H.264 1080×1920 @
+  30 fps + AAC, 34.800 s, 70 of 70 cues audible, 0 unsafe-area pixels, preview seek identical.
 - Free-motion run (2026-11-14, headless Chromium, software GL): 3 scenes, 13 s, 720×1280:
   Kokoro narration on all scenes, depth on both pictures, no requests outside the app's origin,
   60 s total on CPU; H.264 + AAC, mean −24 dB / peak −6 dB. Fallbacks checked: voice model

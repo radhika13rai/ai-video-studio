@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.14.0 (2026-11-15)
+
+- Graphics scenes (Task 11, ADR 048): motion-graphics explainers drawn in the browser, in the
+  style of short-form SaaS explainers — dotted background, chunky orange 3D headlines, white
+  cards, blue connectors, checks popping in one by one, a floating folder and a pixel mascot that
+  stay on screen across scenes, and a synthesized sound on every element. Eleven layout presets.
+- Briefs that ask for motion graphics get a `motion_graphics` style: every scene is a graphics
+  scene, no AI images or footage are generated, and a new `graphics-layout` step picks each
+  scene's preset and fills its text (validated; a deterministic layout when the model is off or
+  fails).
+- New sound effects: click, tick, confirm and impact (also available in the editor).
+- Editor: a graphics scene's preset and text are edited in the Scene tab (undo and autosave as
+  usual); picture settings and "New image" are hidden for it.
+- Migration 0005: `scenes.graphics_layout`, `projects.graphics_theme`, and `graphics` allowed as
+  a scene visual type.
+
 ## 1.13.0 (2026-11-15)
 
 - Regenerate one scene from the editor (E5): a new image (optionally from your own description)

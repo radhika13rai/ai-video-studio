@@ -145,5 +145,6 @@ rejects API calls until Cloudflare Access is configured.
 - [x] 8. Provider adapters
 - [x] 9. Browser renderer
 - [x] 10. Quality control, CI and deployment
+- [x] 11. Graphics scenes (motion-graphics explainers drawn in the browser, ADR 048)
 
 Development rules are in [`CLAUDE.md`](CLAUDE.md).

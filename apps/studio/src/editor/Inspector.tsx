@@ -14,6 +14,7 @@ import {
 import { CAMERA_MOVES, MUSIC_MOODS, SCENE_TRANSITIONS, SHOT_SIZES } from "@avs/types";
 import type { ReactNode } from "react";
 import type { EditorCommand } from "./commands";
+import { GraphicsEditor } from "./GraphicsEditor";
 import type { InspectorTab } from "./TimelineView";
 
 /** Settings for the selected scene (and the video's captions and audio). */
@@ -211,80 +212,84 @@ export function Inspector({
               />
             </Field>
           )}
-          <div className="grid2">
-            <Field label="Camera">
-              <select
-                aria-label="Camera"
-                value={clip.camera ?? ""}
-                onChange={(e) =>
-                  dispatch({
-                    type: "updateClip",
-                    clipId: clip.id,
-                    patch: { camera: (e.target.value || null) as Clip["camera"] },
-                  })
-                }
-              >
-                <option value="">Automatic</option>
-                {CAMERA_MOVES.map((c) => (
-                  <option key={c} value={c}>
-                    {label(c)}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Shot">
-              <select
-                aria-label="Shot"
-                value={clip.shot ?? ""}
-                onChange={(e) =>
-                  dispatch({
-                    type: "updateClip",
-                    clipId: clip.id,
-                    patch: { shot: (e.target.value || null) as Clip["shot"] },
-                  })
-                }
-              >
-                <option value="">Automatic</option>
-                {SHOT_SIZES.map((s) => (
-                  <option key={s} value={s}>
-                    {label(s)}
-                  </option>
-                ))}
-              </select>
-            </Field>
-          </div>
-          <Field label="Framing (focus point)" hint="Moves the crop towards what matters.">
-            <Range
-              name="Focus left–right"
-              value={clip.focal.x}
-              min={0}
-              max={1}
-              step={0.05}
-              format={(v) => (v < 0.45 ? "left" : v > 0.55 ? "right" : "centre")}
-              onChange={(x) =>
-                dispatch({
-                  type: "updateClip",
-                  clipId: clip.id,
-                  patch: { focal: { ...clip.focal, x } },
-                })
-              }
-            />
-            <Range
-              name="Focus top–bottom"
-              value={clip.focal.y}
-              min={0}
-              max={1}
-              step={0.05}
-              format={(v) => (v < 0.45 ? "top" : v > 0.55 ? "bottom" : "middle")}
-              onChange={(y) =>
-                dispatch({
-                  type: "updateClip",
-                  clipId: clip.id,
-                  patch: { focal: { ...clip.focal, y } },
-                })
-              }
-            />
-          </Field>
+          {clip.visual_type !== "graphics" && (
+            <>
+              <div className="grid2">
+                <Field label="Camera">
+                  <select
+                    aria-label="Camera"
+                    value={clip.camera ?? ""}
+                    onChange={(e) =>
+                      dispatch({
+                        type: "updateClip",
+                        clipId: clip.id,
+                        patch: { camera: (e.target.value || null) as Clip["camera"] },
+                      })
+                    }
+                  >
+                    <option value="">Automatic</option>
+                    {CAMERA_MOVES.map((c) => (
+                      <option key={c} value={c}>
+                        {label(c)}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Shot">
+                  <select
+                    aria-label="Shot"
+                    value={clip.shot ?? ""}
+                    onChange={(e) =>
+                      dispatch({
+                        type: "updateClip",
+                        clipId: clip.id,
+                        patch: { shot: (e.target.value || null) as Clip["shot"] },
+                      })
+                    }
+                  >
+                    <option value="">Automatic</option>
+                    {SHOT_SIZES.map((s) => (
+                      <option key={s} value={s}>
+                        {label(s)}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              </div>
+              <Field label="Framing (focus point)" hint="Moves the crop towards what matters.">
+                <Range
+                  name="Focus left–right"
+                  value={clip.focal.x}
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  format={(v) => (v < 0.45 ? "left" : v > 0.55 ? "right" : "centre")}
+                  onChange={(x) =>
+                    dispatch({
+                      type: "updateClip",
+                      clipId: clip.id,
+                      patch: { focal: { ...clip.focal, x } },
+                    })
+                  }
+                />
+                <Range
+                  name="Focus top–bottom"
+                  value={clip.focal.y}
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  format={(v) => (v < 0.45 ? "top" : v > 0.55 ? "bottom" : "middle")}
+                  onChange={(y) =>
+                    dispatch({
+                      type: "updateClip",
+                      clipId: clip.id,
+                      patch: { focal: { ...clip.focal, y } },
+                    })
+                  }
+                />
+              </Field>
+            </>
+          )}
           {clip.video_asset_id && (
             <Field label="Skip the start of the footage">
               <Range
@@ -303,7 +308,13 @@ export function Inspector({
         </div>
       )}
 
-      {tab === "scene" && versions}
+      {tab === "scene" && clip.visual_type === "graphics" && (
+        <div className="panel">
+          <GraphicsEditor clip={clip} dispatch={dispatch} />
+        </div>
+      )}
+      {/* Graphics scenes have no picture to regenerate: their layout is edited above. */}
+      {tab === "scene" && clip.visual_type !== "graphics" && versions}
 
       {tab === "voice" && (
         <div className="panel">

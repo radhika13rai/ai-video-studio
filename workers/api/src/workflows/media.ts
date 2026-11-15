@@ -58,6 +58,9 @@ export async function prepareMediaStage(ctx: StepContext, env: Env): Promise<Sce
   }));
 }
 
+/** Graphics scenes are laid out and drawn by the browser renderer: no picture to generate. */
+export const GRAPHICS_SCENE_REASON = "Graphics scene (drawn by the renderer).";
+
 /** Narration with no server voice provider is voiced by Kokoro in the browser at render time. */
 export const BROWSER_VOICE_REASON =
   "Narration is voiced in the browser (Kokoro) when the video renders.";
@@ -265,7 +268,7 @@ export interface SceneOutcome {
 
 /** Plain-language notes about anything that didn't go as the brief asked. */
 export function summarizeFallbacks(
-  visualStyle: "image" | "video" | "animation",
+  visualStyle: "image" | "video" | "animation" | "motion_graphics",
   narration: boolean,
   outcomes: SceneOutcome[],
 ): string[] {
@@ -288,7 +291,7 @@ export function summarizeFallbacks(
       notes.push(
         `${withVideo.length} of ${triedVideo.length} scenes use stock footage from Pexels; the others use generated still images with motion effects (${reasonOf(triedVideo.find((o) => o.video?.status !== "ok")?.video)}).`,
       );
-  } else if (visualStyle !== "image")
+  } else if (visualStyle !== "image" && visualStyle !== "motion_graphics")
     notes.push(
       visualStyle === "video"
         ? "No video source is set up (add a free Pexels key for stock footage); scenes use generated still images with motion effects instead."
@@ -407,7 +410,7 @@ export async function regenerateSceneMedia(
 /** Rebuilds the fallback notes from the assets that exist now (after a retry). */
 export async function refreshFallbacks(
   ctx: StepContext,
-  visualStyle: "image" | "video" | "animation",
+  visualStyle: "image" | "video" | "animation" | "motion_graphics",
   narration: boolean,
   env: Env,
 ): Promise<string[]> {
@@ -417,11 +420,13 @@ export async function refreshFallbacks(
   const outcomes = scenes.map((s) => {
     const has = (t: string) => assets.some((a) => a.scene_id === s.id && a.asset_type === t);
     const image: MediaOutcome =
-      s.visual_type === "text" || !s.visual_prompt
-        ? { status: "skipped", reason: "text card" }
-        : has("image")
-          ? { status: "ok", asset_id: "", provider: "" }
-          : { status: "fallback", reason: "no image was generated" };
+      s.visual_type === "graphics"
+        ? { status: "skipped", reason: GRAPHICS_SCENE_REASON }
+        : s.visual_type === "text" || !s.visual_prompt
+          ? { status: "skipped", reason: "text card" }
+          : has("image")
+            ? { status: "ok", asset_id: "", provider: "" }
+            : { status: "fallback", reason: "no image was generated" };
     const voice: MediaOutcome = !s.voiceover?.trim()
       ? { status: "skipped", reason: "no narration" }
       : browserVoice

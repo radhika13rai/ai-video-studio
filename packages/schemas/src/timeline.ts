@@ -8,6 +8,13 @@ import {
   SHOT_SIZES,
 } from "@avs/types";
 import { z } from "zod";
+import {
+  graphicsLayoutSchema,
+  graphicsThemeSchema,
+  MAX_GRAPHICS_LAYOUT_BYTES,
+  type GraphicsLayout,
+  type GraphicsTheme,
+} from "./graphics";
 
 /**
  * Timeline v1: the editable, persisted description of a video (ADR 043). Clips are kept in order
@@ -28,7 +35,17 @@ export const MAX_TIMELINE_BYTES = 256 * 1024;
 
 export const OVERLAY_PRESETS = ["title", "lower_third", "label", "quote"] as const;
 export const OVERLAY_ANIMATIONS = ["none", "fade", "pop", "slide_up", "typewriter"] as const;
-export const SFX_KINDS = ["whoosh", "hit", "riser", "pop", "boom"] as const;
+export const SFX_KINDS = [
+  "whoosh",
+  "hit",
+  "riser",
+  "pop",
+  "boom",
+  "click",
+  "tick",
+  "confirm",
+  "impact",
+] as const;
 export const CAPTION_STYLES = ["bold", "minimal", "karaoke"] as const;
 export const CAPTION_POSITIONS = ["bottom", "middle", "top"] as const;
 
@@ -97,6 +114,8 @@ export const clipSchema = z.object({
   on_screen_text: z.string().max(80).nullable(),
   overlays: z.array(textOverlaySchema).max(8),
   sfx: z.array(sfxCueSchema).max(8),
+  /** A motion-graphics scene's layout (visual_type "graphics"; ADR 048). */
+  graphics: graphicsLayoutSchema.optional(),
 });
 export type Clip = z.infer<typeof clipSchema>;
 
@@ -120,6 +139,8 @@ export const timelineSchema = z
     }),
     /** Whooshes and hits on planned transitions. */
     auto_transition_sfx: z.boolean(),
+    /** The look shared by graphics scenes (absent: the default theme). */
+    graphics_theme: graphicsThemeSchema.optional(),
   })
   .superRefine((t, ctx) => {
     const ids = new Set<string>();
@@ -134,6 +155,8 @@ export const timelineSchema = z
       for (const s of c.sfx)
         if (s.at_s >= c.duration_s)
           ctx.addIssue({ code: "custom", message: `sound "${s.id}" is after its clip ends` });
+      if (c.graphics && JSON.stringify(c.graphics).length > MAX_GRAPHICS_LAYOUT_BYTES)
+        ctx.addIssue({ code: "custom", message: `clip "${c.id}" layout is over 8 KB` });
     }
     const total = t.clips.reduce((n, c) => n + c.duration_s, 0);
     if (total > MAX_TIMELINE_SECONDS)
@@ -177,6 +200,8 @@ export interface ProductionScene {
   voiceover: string | null;
   duration_seconds: number;
   visual_type: (typeof SCENE_VISUAL_TYPES)[number];
+  /** The stored layout of a graphics scene. */
+  graphics_layout?: GraphicsLayout | null;
 }
 export interface ProductionAsset {
   id: string;
@@ -205,6 +230,7 @@ export function timelineFromProduction(input: {
   assets: ProductionAsset[];
   directions?: SceneDirection[];
   music?: { mood: (typeof MUSIC_MOODS)[number]; tempo_bpm: number } | null;
+  graphics_theme?: GraphicsTheme | null;
 }): Timeline {
   const dir = new Map((input.directions ?? []).map((d) => [d.scene_number, d]));
   const newest = (sceneId: string, type: string) =>
@@ -244,6 +270,7 @@ export function timelineFromProduction(input: {
         on_screen_text: d?.on_screen_text ?? null,
         overlays: [],
         sfx: [],
+        ...(s.graphics_layout ? { graphics: s.graphics_layout } : {}),
       };
     }),
     captions: { enabled: true, style: "bold", position: "bottom" },
@@ -255,6 +282,7 @@ export function timelineFromProduction(input: {
       duck_under_voice: true,
     },
     auto_transition_sfx: true,
+    ...(input.graphics_theme ? { graphics_theme: input.graphics_theme } : {}),
   };
 }
 
@@ -284,6 +312,7 @@ export interface CompiledScene {
   transition_seconds?: number;
   focal?: { x: number; y: number };
   trim_in_seconds?: number;
+  graphics?: GraphicsLayout;
 }
 
 export interface CompiledTimeline {
@@ -298,6 +327,7 @@ export interface CompiledTimeline {
     duck_under_voice: boolean;
     transition_sfx: boolean;
   };
+  graphics_theme?: GraphicsTheme;
 }
 
 /**
@@ -343,6 +373,7 @@ export function compileTimeline(
         : {}),
       ...(c.focal.x !== 0.5 || c.focal.y !== 0.5 ? { focal: c.focal } : {}),
       ...(c.trim_in_s > 0 ? { trim_in_seconds: c.trim_in_s } : {}),
+      ...(c.graphics ? { graphics: c.graphics } : {}),
     };
     start += c.duration_s;
     return scene;
@@ -359,6 +390,7 @@ export function compileTimeline(
       ? { music: { mood: m.mood, tempo_bpm: m.tempo_bpm } }
       : {}),
     ...(cap.enabled && cap.style === "bold" && cap.position === "bottom" ? {} : { captions: cap }),
+    ...(timeline.graphics_theme ? { graphics_theme: timeline.graphics_theme } : {}),
     ...(defaultMix
       ? {}
       : {

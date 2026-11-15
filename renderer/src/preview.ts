@@ -2,6 +2,7 @@ import type { KokoroVoiceId } from "@avs/contracts";
 import type { RenderManifest } from "@avs/schemas";
 import { decodeAudio, mixNarration, samplesToBuffer } from "./audio";
 import { startModelWorker } from "./ml";
+import { loadDisplayFont } from "./graphics";
 import { makeGrain, paintFrame, type FrameContext, type SceneMedia } from "./painter";
 import { fitDurations, sceneWords, withDurations } from "./prepare";
 import { LIMITS, mixCues, speechPlan } from "./render";
@@ -25,6 +26,8 @@ export interface PreviewOptions {
   voiceCache?: VoiceCache;
   /** Output height in pixels (default 640, i.e. 360×640 for 9:16). */
   height?: number;
+  /** Origin the /vendor/ files (display font) are served from (default: this page's). */
+  vendorBase?: string;
 }
 
 export interface PreviewState {
@@ -204,10 +207,13 @@ export async function createPreview(
         parallax: null,
         grain,
         ...(m.captions ? { captions: m.captions } : {}),
+        ...(m.graphics_theme ? { graphicsTheme: m.graphics_theme } : {}),
       },
     };
   }
 
+  // Graphics scenes draw their headlines with the display font (bold Inter if it can't load).
+  await loadDisplayFont(opts.vendorBase);
   let built = await build(manifest);
   let playing = false;
   let offset = 0; // seconds into the video when (re)started or paused

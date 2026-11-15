@@ -276,3 +276,58 @@ describe("regenerating and exporting from the editor", () => {
     expect(location.pathname).toBe("/projects/p1");
   });
 });
+
+describe("graphics scenes", () => {
+  function graphicsTimeline(): Timeline {
+    const t = sampleTimeline();
+    return {
+      ...t,
+      clips: t.clips.map((c, i) =>
+        i === 0
+          ? {
+              ...c,
+              visual_type: "graphics" as const,
+              graphics: {
+                preset: "checklist" as const,
+                headline: "LOADED",
+                rows: ["Objections", "Pricing"],
+              },
+            }
+          : c,
+      ),
+    };
+  }
+
+  it("edits the layout's text and preset, with undo, and saves it", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const h = api({ timeline: graphicsTimeline() });
+    render(<EditorPage id="p1" store={memoryDraftStore()} />);
+    const headline = (await screen.findByLabelText("Headline")) as HTMLInputElement;
+    expect(headline.value).toBe("LOADED");
+    // Picture-only settings are hidden for graphics scenes.
+    expect(screen.queryByLabelText("Camera")).toBeNull();
+    expect(screen.queryByRole("button", { name: "New image" })).toBeNull();
+
+    fireEvent.change(headline, { target: { value: "ALL LOADED" } });
+    const items = screen.getByLabelText("Checklist items (one per line)") as HTMLTextAreaElement;
+    fireEvent.change(items, { target: { value: "Objections\nPricing\nFollow-ups\n" } });
+    // The trailing newline stays while typing.
+    expect(items.value).toBe("Objections\nPricing\nFollow-ups\n");
+    await advance(LOCAL_SAVE_MS + SERVER_SAVE_MS + 50);
+    expect(h.puts.at(-1)?.timeline.clips[0]?.graphics).toEqual({
+      preset: "checklist",
+      headline: "ALL LOADED",
+      rows: ["Objections", "Pricing", "Follow-ups"],
+    });
+
+    // An empty required headline isn't saved, and says why.
+    fireEvent.change(screen.getByLabelText("Headline"), { target: { value: "" } });
+    expect(screen.getByText(/Not saved/)).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText("Layout preset"), { target: { value: "cta_card" } });
+    expect((screen.getByLabelText("Handle") as HTMLInputElement).value).toBe("@yourhandle");
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect((screen.getByLabelText("Layout preset") as HTMLSelectElement).value).toBe("checklist");
+    expect((screen.getByLabelText("Headline") as HTMLInputElement).value).toBe("ALL LOADED");
+  });
+});
