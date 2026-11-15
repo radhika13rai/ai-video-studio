@@ -1,9 +1,11 @@
 import { API_PATHS } from "@avs/contracts";
 import { env, introspectWorkflow, SELF } from "cloudflare:test";
 import { afterEach, describe, expect, it } from "vitest";
-import { setTextModelOverride } from "../src/ai/factory";
+import { setTextModelOverride as setRawTextModelOverride } from "../src/ai/factory";
+import { setTextModelOverride } from "./helpers";
 import { ModelError, type TextModel } from "../src/ai/text-model";
 import {
+  createWorkflowRun,
   createAsset,
   getLatestQualityReport,
   getLatestWorkflowRun,
@@ -13,6 +15,7 @@ import {
   upsertUserByEmail,
 } from "../src/db";
 import {
+  WORKFLOW_NAME,
   MAX_RENDER_ATTEMPTS,
   RENDER_EVENT,
   renderRequestIdFor,
@@ -141,11 +144,32 @@ describe("production workflow", () => {
     expect(notes[1]).toMatch(/6 of 6 scenes have no narration audio/);
 
     const jobs = await listJobs(env.DB, user.id, projectId);
-    expect(jobs.slice(0, 3).map((j) => [j.agent_name, j.status])).toEqual([
+    expect(jobs.slice(0, 4).map((j) => [j.agent_name, j.status])).toEqual([
       ["director", "completed"],
+      ["creative-director", "completed"],
       ["scriptwriter", "completed"],
       ["storyboard", "completed"],
     ]);
+    // The Creative Director's blueprint is saved, and scene prompts carry the shared style
+    // and the recurring character's description.
+    const blueprint = project.production_config.blueprint as {
+      blueprint_version: number;
+      source: { interpretation: string };
+      narrative: { structure: string; beats: unknown[] };
+      characters: { id: string }[];
+      scenes: { visual_prompt: string; transition_in: string }[];
+    };
+    expect(blueprint).toMatchObject({
+      blueprint_version: 1,
+      source: { interpretation: "model" },
+      narrative: { structure: "listicle" },
+      characters: [{ id: "diver" }],
+    });
+    expect(blueprint.scenes).toHaveLength(6);
+    expect(blueprint.scenes[0]?.transition_in).toBe("cut");
+    const saved = await listScenes(env.DB, user.id, projectId);
+    expect(saved[0]?.visual_prompt).toMatch(/Style: bioluminescent/);
+    expect(saved[0]?.visual_prompt).toMatch(/Avoid: text overlays/);
     // One image and one narration job per scene, completed with a recorded fallback.
     expect(jobs.filter((j) => j.agent_name === "visual-artist")).toHaveLength(6);
     expect(jobs.filter((j) => j.agent_name === "voice-director")).toHaveLength(6);
@@ -165,7 +189,7 @@ describe("production workflow", () => {
     )
       .bind(projectId)
       .first<{ n: number }>();
-    expect(usage?.n).toBe(300); // two model calls × 150 tokens
+    expect(usage?.n).toBe(400); // interpretation (100) + script and storyboard (150 each)
   });
 
   it("after a failed quality check, asks for another render without regenerating media", async () => {
@@ -237,6 +261,53 @@ describe("production workflow", () => {
     );
     const report = await getLatestQualityReport(env.DB, owner.id, projectId);
     expect(report?.checks).toMatchObject({ attempt: 2 });
+  });
+
+  it("keeps going on templates when the Creative Director's model output is unusable", async () => {
+    // No helper here: the first two replies go to the interpretation and are invalid.
+    setRawTextModelOverride(scripted("not json", '{"subject": 1}', SCRIPT, BOARD));
+    await using introspector = await introspectWorkflow(env.PRODUCTION_WORKFLOW);
+    const projectId = await newProject();
+    await call(API_PATHS.projectGenerate(projectId), { method: "POST" });
+    const [instance] = await introspector.get();
+    await instance!.waitForStepResult({ name: "request-render" });
+    const user = await upsertUserByEmail(env.DB, EMAIL);
+    const project = await requireProject(env.DB, user.id, projectId);
+    expect(project.status).toBe("awaiting_render");
+    expect(project.production_config.interpretation).toMatchObject({ source: "rules" });
+    expect(project.production_config.blueprint).toMatchObject({
+      source: { interpretation: "rules" },
+      characters: [],
+    });
+  });
+
+  it("runs started before the Creative Director skip its steps (replay compatibility)", async () => {
+    setTextModelOverride(scripted(SCRIPT, BOARD));
+    await using introspector = await introspectWorkflow(env.PRODUCTION_WORKFLOW);
+    const projectId = await newProject();
+    const user = await upsertUserByEmail(env.DB, EMAIL);
+    // Start a run the old way: no `blueprint` parameter.
+    await env.DB.prepare("UPDATE projects SET status = 'planning' WHERE id = ?")
+      .bind(projectId)
+      .run();
+    const runId = crypto.randomUUID();
+    await createWorkflowRun(env.DB, user.id, projectId, {
+      id: runId,
+      workflow_name: WORKFLOW_NAME,
+      workflow_instance_id: runId,
+    });
+    await env.PRODUCTION_WORKFLOW.create({
+      id: runId,
+      params: { projectId, userId: user.id, runId },
+    });
+    const [instance] = await introspector.get();
+    await instance!.waitForStepResult({ name: "request-render" });
+    const jobs = await listJobs(env.DB, user.id, projectId);
+    expect(jobs.map((j) => j.agent_name)).not.toContain("creative-director");
+    const project = await requireProject(env.DB, user.id, projectId);
+    expect(project.production_config.blueprint).toBeUndefined();
+    expect(project.production_config.interpretation).toBeUndefined();
+    expect(await listScenes(env.DB, user.id, projectId)).toHaveLength(6);
   });
 
   it("stops at 'Ready to render' until the browser finishes", async () => {

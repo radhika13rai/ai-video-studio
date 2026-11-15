@@ -9,7 +9,7 @@ import {
 import { renderManifestSchema } from "@avs/schemas";
 import { env, introspectWorkflow, SELF } from "cloudflare:test";
 import { afterEach, describe, expect, it } from "vitest";
-import { setTextModelOverride } from "../src/ai/factory";
+import { setTextModelOverride } from "./helpers";
 import { getLatestWorkflowRun, listAssets, requireProject, upsertUserByEmail } from "../src/db";
 import { sniffMedia } from "../src/providers/media-bytes";
 import { setMediaProvidersOverride } from "../src/providers/registry";

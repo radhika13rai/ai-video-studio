@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.4.0 (2026-11-15)
+
+- Creative Director: every new production gets a validated blueprint (story beats, style bible,
+  recurring characters, shot/camera/transition per scene, music and pacing, asset requirements).
+  One extra model call with schema validation and a template fallback; ambiguous or malformed
+  requests become visible assumptions instead of guesses. Scene image prompts now share one
+  style and repeat each recurring character's description.
+
 ## 1.3.0 (2026-11-14)
 
 - One render per project: attempt tokens with a 30-minute lease; a second tab or device gets

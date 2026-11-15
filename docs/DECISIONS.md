@@ -231,3 +231,13 @@ and replace the old video only after the new asset row exists. `mergeProductionC
 **Why:** two tabs or devices could break each other's renders, a stale tab could cancel a live
 one, a 95 MB body could exhaust Worker memory, and a failed upload could lose the previous video.
 No migration: the token lives in the existing `production_config` JSON.
+
+## 038. Creative Director: rule-based templates plus one validated model proposal (2026-11-15)
+
+The blueprint is composed deterministically from per-type templates; a single model call adds
+the request's specifics (subject, characters, style), and every model value is validated,
+sanitised and replaceable by the template's. Character consistency is a fixed appearance
+description repeated in each scene's prompt; names never reach the image model. New steps are
+gated by a run parameter. **Why:** structure and pacing are craft rules that templates encode
+reliably and for free; the model is good at specifics but unreliable at structure; one extra
+call keeps the free quota impact small; gating keeps Workflows replay safe for waiting runs.

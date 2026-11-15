@@ -2,7 +2,13 @@ import type { Asset, Job, Project, QualityReport, Scene, WorkflowRun } from "@av
 import type { ProjectStatus } from "@avs/types";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { ErrorBox } from "../components/Feedback";
-import { PipelineSteps, pipelineSteps, SceneList } from "../components/Production";
+import {
+  blueprintAssumptions,
+  PipelineSteps,
+  pipelineSteps,
+  SceneList,
+  sceneDirections,
+} from "../components/Production";
 import { QualityCard } from "../components/QualityCard";
 import { FinalVideo, RenderPanel } from "../components/RenderPanel";
 import { StatusBadge } from "../components/StatusBadge";
@@ -157,6 +163,8 @@ export function ProjectPage({ id }: { id: string }) {
   const p = state.project;
   const style = typeof p.production_config.style === "string" ? p.production_config.style : null;
   const finalVideo = progress.assets.find((a) => a.asset_type === "render") ?? null;
+  const assumptions = blueprintAssumptions(p.production_config);
+  const directions = sceneDirections(p.production_config);
   const fallbacks = Array.isArray(p.production_config.fallbacks)
     ? p.production_config.fallbacks.filter((f): f is string => typeof f === "string")
     : [];
@@ -310,6 +318,18 @@ export function ProjectPage({ id }: { id: string }) {
           {p.status === "failed" && progress.run?.error_message && (
             <p className="alert error small-alert">{progress.run.error_message}</p>
           )}
+          {assumptions.length > 0 && (
+            <div className="notes assumptions">
+              <p className="small">
+                <strong>Assumptions made from your request</strong>
+              </p>
+              <ul className="notes">
+                {assumptions.map((a) => (
+                  <li key={a}>{a}</li>
+                ))}
+              </ul>
+            </div>
+          )}
           {fallbacks.length > 0 && (
             <ul className="notes">
               {fallbacks.map((f) => (
@@ -357,6 +377,7 @@ export function ProjectPage({ id }: { id: string }) {
       <SceneList
         scenes={progress.scenes}
         assets={progress.assets}
+        directions={directions}
         retrying={retrying}
         {...(p.status === "awaiting_render" && !rendering ? { onRetry: retryScene } : {})}
       />

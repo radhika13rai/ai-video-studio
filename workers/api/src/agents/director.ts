@@ -147,16 +147,21 @@ const PIPELINES: Record<
   },
 };
 
+/** Keyword hits per video type, highest first (shared with the Creative Director). */
+export function scoreTypes(text: string): { type: ConcreteVideoType; hits: number }[] {
+  const lower = text.toLowerCase();
+  return RULES.map((r) => ({
+    type: r.type,
+    hits: r.words.filter((w) => w.test(lower)).length,
+  })).sort((a, b) => b.hits - a.hits);
+}
+
 export function classify(brief: Pick<Brief, "title" | "prompt" | "style">): {
   type: ConcreteVideoType;
   confidence: number;
   reason: string;
 } {
-  const text = `${brief.title} ${brief.prompt} ${brief.style ?? ""}`.toLowerCase();
-  const scored = RULES.map((r) => ({
-    type: r.type,
-    hits: r.words.filter((w) => w.test(text)).length,
-  })).sort((a, b) => b.hits - a.hits);
+  const scored = scoreTypes(`${brief.title} ${brief.prompt} ${brief.style ?? ""}`);
   const [best, second] = scored;
   if (!best || best.hits === 0)
     return {

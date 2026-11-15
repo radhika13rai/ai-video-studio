@@ -1,4 +1,6 @@
 import { env } from "cloudflare:test";
+import { setTextModelOverride as setRawTextModelOverride } from "../src/ai/factory";
+import type { TextModel, TextRequest } from "../src/ai/text-model";
 import { createProject, upsertUserByEmail, type CreateProjectRequest } from "../src/db";
 
 export const db = () => env.DB;
@@ -17,4 +19,55 @@ export async function makeProject(userId: string, overrides: Partial<CreateProje
     target_platform: "youtube_shorts",
     ...overrides,
   });
+}
+
+// --- Fake text models -------------------------------------------------------------------------
+
+/** A valid Creative Director interpretation, returned by test models for that one request. */
+export const INTERPRETATION = {
+  subject: "The deep ocean",
+  audience: "curious viewers",
+  key_message: "The deep sea is stranger than you think",
+  call_to_action: null,
+  tone_words: ["curious", "vivid"],
+  setting: "the dark deep sea",
+  characters: [
+    {
+      name: "Diver",
+      role: "explorer",
+      appearance: "a diver in a yellow dive suit with a round brass helmet",
+      wardrobe: "yellow dive suit",
+    },
+  ],
+  style_keywords: ["bioluminescent"],
+  must_include: [],
+  must_avoid: ["text overlays"],
+  language: "en",
+  ambiguities: [],
+};
+
+const isCreativeDirector = (req: TextRequest) =>
+  req.system.startsWith("You are the creative director");
+
+/**
+ * Wraps a test model so the Creative Director's interpretation request gets INTERPRETATION and
+ * every other request (script, storyboard) reaches the wrapped model in its original order.
+ */
+export function withCreativeDirector(model: TextModel): TextModel {
+  return {
+    name: model.name,
+    async generate(req) {
+      if (isCreativeDirector(req))
+        return {
+          text: JSON.stringify(INTERPRETATION),
+          usage: { input_tokens: 40, output_tokens: 60 },
+        };
+      return model.generate(req);
+    },
+  };
+}
+
+/** Installs a fake model for the workflow (Creative Director requests answered as above). */
+export function setTextModelOverride(model: TextModel | null) {
+  setRawTextModelOverride(model ? withCreativeDirector(model) : null);
 }

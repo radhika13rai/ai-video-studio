@@ -4,6 +4,14 @@ import { NonRetryableError } from "cloudflare:workflows";
 import type { QualityStatus } from "@avs/types";
 import { z } from "zod";
 import { briefSchema, runDirector, runScriptwriter, runStoryboard, type Brief } from "../agents";
+import {
+  compose,
+  interpretBrief,
+  storyboardCreativeSchema,
+  TEMPLATES,
+  validateBlueprint,
+  type Interpretation,
+} from "../creative";
 import { textModelFor } from "../ai/factory";
 import {
   cancelOpenJobs,
@@ -39,6 +47,11 @@ const paramsSchema = z.object({
   projectId: z.string().min(1),
   userId: z.string().min(1),
   runId: z.uuid(),
+  /**
+   * Creative Director version. Set for runs started after it was added; older runs (which may
+   * still be waiting for a render) skip its steps, so their replay is unchanged.
+   */
+  blueprint: z.literal(1).optional(),
 });
 export type ProductionParams = z.infer<typeof paramsSchema>;
 
@@ -87,6 +100,7 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, ProductionParams
     const parsed = paramsSchema.safeParse(event.payload);
     if (!parsed.success) throw new NonRetryableError("Invalid workflow parameters.");
     const { projectId, userId, runId } = parsed.data;
+    const creativeDirector = parsed.data.blueprint === 1;
     const db = this.env.DB;
     if (!db) throw new NonRetryableError("The database binding is missing.");
     const ctx: StepContext = { db, userId, projectId, runId };
@@ -125,12 +139,42 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, ProductionParams
         return result;
       });
 
+      // Creative Director: interpret the request (model proposal, validated; rules as fallback).
+      // It never fails the run: any model problem falls back to the templates.
+      const interpretation: Interpretation | null = creativeDirector
+        ? await step.do("creative-director", async () => {
+            await ensureActive("creative-director");
+            const model = textModelFor(this.env);
+            const result = await runAgentJob(
+              ctx,
+              "creative-director",
+              "interpret_brief",
+              model,
+              async () => {
+                const { interpretation: output, meta } = await interpretBrief(model, brief, plan);
+                return { output, meta };
+              },
+            );
+            await mergeProductionConfig(db, userId, projectId, { interpretation: result });
+            return result;
+          })
+        : null;
+      const template = TEMPLATES[plan.video_type];
+
       const script = await step.do("scriptwriter", retry, async () => {
         await ensureActive("scriptwriter");
         const model = textModelFor(this.env);
         if (!model) throw new NonRetryableError("No text model is available in this environment.");
+        const guidance = interpretation
+          ? {
+              beats: template.beats.map((b) => ({ name: b.name, purpose: b.purpose })),
+              key_message: interpretation.key_message,
+              audience: interpretation.audience,
+              call_to_action: interpretation.call_to_action,
+            }
+          : undefined;
         return runAgentJob(ctx, "scriptwriter", "write_script", model, () =>
-          runScriptwriter(model, { brief, plan }),
+          runScriptwriter(model, { brief, plan, ...(guidance ? { guidance } : {}) }),
         );
       });
 
@@ -138,13 +182,71 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, ProductionParams
         await ensureActive("storyboard");
         const model = textModelFor(this.env);
         if (!model) throw new NonRetryableError("No text model is available in this environment.");
+        const guidance = interpretation
+          ? {
+              characters: interpretation.characters.map((c) => ({ name: c.name, role: c.role })),
+              shots: template.shots,
+              cameras: template.cameras,
+              transitions: template.transitions,
+            }
+          : undefined;
         const board = await runAgentJob(ctx, "storyboard", "create_storyboard", model, async () => {
-          const r = await runStoryboard(model, { brief, plan, script });
+          const r = await runStoryboard(model, {
+            brief,
+            plan,
+            script,
+            ...(guidance ? { guidance } : {}),
+          });
           await replaceScenes(db, userId, projectId, r.output.scenes);
           return r;
         });
+        if (creativeDirector)
+          await mergeProductionConfig(db, userId, projectId, {
+            storyboard_creative: board.creative ?? [],
+          });
         return board.scenes.length;
       });
+
+      // Blueprint: deterministic compose + validate. Scenes get consistency-enriched prompts.
+      // A problem here is recorded and production continues with the storyboard as it is.
+      if (interpretation)
+        await step.do("blueprint", async () => {
+          await ensureActive("blueprint");
+          try {
+            const project = await requireProject(db, userId, projectId);
+            const stored = project.production_config.storyboard_creative;
+            const creative = Array.isArray(stored)
+              ? stored.map((c) => storyboardCreativeSchema.safeParse(c).data ?? null)
+              : [];
+            const sceneRows = await listScenes(db, userId, projectId);
+            const blueprint = validateBlueprint(
+              compose({ brief, plan, interpretation, scenes: sceneRows, creative }),
+            );
+            await replaceScenes(
+              db,
+              userId,
+              projectId,
+              sceneRows.map((s, i) => ({
+                scene_number: s.scene_number,
+                description: s.description,
+                visual_prompt: blueprint.scenes[i]?.visual_prompt || s.visual_prompt,
+                voiceover: s.voiceover,
+                duration_seconds: blueprint.scenes[i]?.duration_seconds ?? s.duration_seconds,
+                visual_type: s.visual_type,
+              })),
+            );
+            await mergeProductionConfig(db, userId, projectId, {
+              blueprint,
+              blueprint_error: null,
+            });
+            return { scenes: blueprint.scenes.length, issues: blueprint.issues.length };
+          } catch (err) {
+            const message = err instanceof Error ? err.message.slice(0, 300) : String(err);
+            console.error("Blueprint step failed; continuing with the storyboard", message);
+            await mergeProductionConfig(db, userId, projectId, { blueprint_error: message });
+            return { scenes: 0, issues: 0 };
+          }
+        });
 
       const scenes = await step.do("generate-assets", async () => {
         await ensureActive("generate-assets");

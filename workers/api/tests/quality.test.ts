@@ -1,7 +1,7 @@
 import { API_PATHS, RENDER_ATTEMPT_HEADER } from "@avs/contracts";
 import { env, introspectWorkflow, SELF } from "cloudflare:test";
 import { afterEach, describe, expect, it } from "vitest";
-import { setTextModelOverride } from "../src/ai/factory";
+import { setTextModelOverride } from "./helpers";
 import { listAssets, listJobs, listScenes, requireProject, upsertUserByEmail } from "../src/db";
 import { sniffMedia } from "../src/providers/media-bytes";
 import { setMediaProvidersOverride } from "../src/providers/registry";
