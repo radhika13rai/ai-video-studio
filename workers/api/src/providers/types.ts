@@ -19,7 +19,14 @@ export const MEDIA_CAPABILITIES: readonly MediaCapability[] = [
 /** One typed request per capability. */
 export type MediaRequest =
   | { capability: "image"; prompt: string; aspect_ratio: AspectRatio }
-  | { capability: "video"; prompt: string; aspect_ratio: AspectRatio; duration_seconds: number }
+  | {
+      capability: "video";
+      prompt: string;
+      aspect_ratio: AspectRatio;
+      duration_seconds: number;
+      /** Results to skip (their `model` ids), e.g. clips the scene already has. */
+      avoid?: string[];
+    }
   | {
       capability: "image_to_video";
       prompt: string;

@@ -50,6 +50,18 @@ function api(
   };
 }
 
+function stubExtra(_h: ReturnType<typeof api>, extra: ReturnType<typeof route>[]) {
+  const base = globalThis.fetch;
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init: RequestInit = {}) => {
+    const url = new URL(String(input), "http://localhost");
+    for (const handler of extra) {
+      const r = handler(url, init);
+      if (r) return new Response(JSON.stringify(r.body), { status: r.status ?? 200 });
+    }
+    return base(input, init);
+  });
+}
+
 const clipLabels = () =>
   screen.getAllByRole("button", { name: /^Scene \d, / }).map((b) => b.getAttribute("aria-label"));
 const advance = (ms: number) => act(async () => void (await vi.advanceTimersByTimeAsync(ms)));
@@ -201,5 +213,66 @@ describe("timeline editor", () => {
     expect(saved.clips[0]!.overlays[0]).toMatchObject({ text: "Your text", preset: "title" });
     expect(saved.clips[0]!.sfx[0]).toMatchObject({ kind: "boom" });
     expect(saved.music.mode).toBe("none");
+  });
+});
+
+describe("regenerating and exporting from the editor", () => {
+  it("puts a regenerated image on the scene (undoable) and saves it", async () => {
+    const h = api();
+    stubExtra(h, [
+      route("POST", /\/scenes\/s1\/regenerate$/, (_u, init) => {
+        expect(JSON.parse(String(init.body))).toEqual({ what: "image", prompt: "A brighter reef" });
+        return ok(
+          {
+            scene_id: "s1",
+            asset: {
+              id: "img9",
+              project_id: "p1",
+              scene_id: "s1",
+              asset_type: "image",
+              storage_key: "k",
+              mime_type: "image/png",
+              file_size: 1,
+              source_provider: "x",
+              license: null,
+              metadata: {},
+              created_at: "",
+            },
+          },
+          201,
+        );
+      }),
+    ]);
+    render(<EditorPage id="p1" store={memoryDraftStore()} />);
+    await screen.findByRole("heading", { name: "Ocean facts" });
+    vi.useFakeTimers();
+    fireEvent.change(screen.getByLabelText("Describe the new picture"), {
+      target: { value: "A brighter reef" },
+    });
+    await act(async () => void fireEvent.click(screen.getByRole("button", { name: "New image" })));
+    await advance(SERVER_SAVE_MS);
+    expect(h.puts.at(-1)!.timeline.clips[0]!.image_asset_id).toBe("img9");
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    await advance(SERVER_SAVE_MS);
+    expect(h.puts.at(-1)!.timeline.clips[0]!.image_asset_id).toBe("img1");
+  });
+
+  it("exports a finished video again and goes to the project page", async () => {
+    const h = api();
+    let exported = false;
+    stubExtra(h, [
+      route("POST", "/api/v1/projects/p1/export", () => {
+        exported = true;
+        return ok({ project_id: "p1", workflow_run_id: "r2", status: "generating" }, 202);
+      }),
+    ]);
+    history.replaceState(null, "", "/projects/p1/edit");
+    render(<EditorPage id="p1" store={memoryDraftStore()} />);
+    await screen.findByRole("heading", { name: "Ocean facts" });
+    await act(
+      async () => void fireEvent.click(await screen.findByRole("button", { name: "Export video" })),
+    );
+    expect(exported).toBe(true);
+    expect(location.pathname).toBe("/projects/p1");
   });
 });

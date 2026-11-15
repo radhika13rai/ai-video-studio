@@ -13,6 +13,7 @@ import {
   getTimeline,
   listAssets,
   listScenes,
+  requireProject,
   type Asset,
   type Project,
   type Scene,
@@ -24,14 +25,28 @@ import {
  * to the render manifest.
  */
 
-/** The current run's media (older runs' files are deleted when a new run makes media). */
+/**
+ * The run that made the project's media: recorded when a run reaches the media stage, so a
+ * later re-export run (which makes no media) doesn't hide it. Older projects: the latest run.
+ */
+export async function mediaRunId(
+  db: D1Database,
+  userId: string,
+  project: Pick<Project, "id" | "production_config">,
+): Promise<string | null> {
+  const recorded = project.production_config.media_run_id;
+  if (typeof recorded === "string" && recorded) return recorded;
+  return (await getLatestWorkflowRun(db, userId, project.id))?.id ?? null;
+}
+
+/** The current media (older runs' files are deleted when a new run makes media). */
 export async function currentMedia(
   db: D1Database,
   userId: string,
   projectId: string,
 ): Promise<{ scenes: Scene[]; assets: Asset[] }> {
-  const run = await getLatestWorkflowRun(db, userId, projectId);
-  const prefix = run ? `projects/${projectId}/runs/${run.id}/` : null;
+  const runId = await mediaRunId(db, userId, await requireProject(db, userId, projectId));
+  const prefix = runId ? `projects/${projectId}/runs/${runId}/` : null;
   const assets = (await listAssets(db, userId, projectId)).filter(
     (a) => a.asset_type !== "render" && (!prefix || a.storage_key.startsWith(prefix)),
   );

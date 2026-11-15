@@ -79,6 +79,7 @@ export function Inspector({
   tab,
   onTab,
   dispatch,
+  versions,
 }: {
   timeline: Timeline;
   clip: Clip;
@@ -86,6 +87,8 @@ export function Inspector({
   tab: InspectorTab;
   onTab: (t: InspectorTab) => void;
   dispatch: (cmd: EditorCommand) => boolean;
+  /** The scene-regeneration section (absent: not shown). */
+  versions?: ReactNode;
 }) {
   const n = timeline.clips.length;
   const tabs: [InspectorTab, string][] = [
@@ -299,6 +302,8 @@ export function Inspector({
           )}
         </div>
       )}
+
+      {tab === "scene" && versions}
 
       {tab === "voice" && (
         <div className="panel">

@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.13.0 (2026-11-15)
+
+- Regenerate one scene from the editor (E5): a new image (optionally from your own description)
+  or another stock clip (never the same one again). Earlier versions are kept and can be picked
+  again; choosing one is undoable. Each scene keeps at most 3 versions plus any the timeline
+  uses.
+- Export a finished video again after editing: a render-only run goes straight to rendering and
+  the quality check, which now judges an edited video against the timeline's length and aspect
+  ratio.
+- The project remembers which run made its media, so re-exports keep every picture and clip.
+
 ## 1.12.0 (2026-11-15)
 
 - Live preview in the editor (E4): play, pause and scrub the edited video with its captions,
