@@ -10,6 +10,7 @@ import {
   startRender,
   uploadRender,
 } from "../services/api";
+import { loadRenderer } from "../services/renderer";
 import { ErrorBox } from "./Feedback";
 
 const STAGES: { key: RenderStage | "upload" | "finish"; label: string }[] = [
@@ -74,8 +75,9 @@ export function RenderPanel({
     const work = async () => {
       let manifest;
       try {
+        // Load the renderer first: if this page predates a deploy, it reloads before a render starts.
+        const { renderVideo } = await loadRenderer({ reloadIfStale: true }); // loaded only when needed
         manifest = await startRender(project.id, takeover);
-        const { renderVideo } = await import("@avs/renderer"); // loaded only when needed
         const result = await renderVideo(manifest, {
           quality,
           voice,
