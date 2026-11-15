@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.12.0 (2026-11-15)
+
+- Live preview in the editor (E4): play, pause and scrub the edited video with its captions,
+  overlays, transitions, music and sound effects, rebuilt shortly after each edit; selecting a
+  scene jumps to it and the timeline follows the playhead while playing.
+- "Voice the preview" voices narration with Kokoro and caches it in the browser; the export
+  reuses cached lines instead of running the voice model again.
+- The renderer's scene timing and caption timing are shared by the preview and the export.
+
 ## 1.11.0 (2026-11-15)
 
 - Timeline editor (E3), at `/projects/:id/edit` ("Edit video" on the project page once the

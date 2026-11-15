@@ -5,7 +5,6 @@ import { useCallback, useEffect, useState } from "react";
 import { ErrorBox } from "../components/Feedback";
 import { Link } from "../lib/router";
 import {
-  assetUrl,
   getProject,
   listAssets,
   listTimelineRevisions,
@@ -14,6 +13,7 @@ import {
 import type { EditorCommand } from "./commands";
 import type { DraftStore } from "./drafts";
 import { Inspector } from "./Inspector";
+import { PreviewPlayer } from "./PreviewPlayer";
 import { TimelineView, type InspectorTab } from "./TimelineView";
 import { useTimelineEditor, type SaveStatus } from "./useTimelineEditor";
 
@@ -57,6 +57,18 @@ export function EditorPage({ id, store }: { id: string; store?: DraftStore }) {
       return applyEdit(cmd);
     },
     [clip, selectedId, applyEdit],
+  );
+
+  // While playing, the timeline follows the scene on screen.
+  const followPlayhead = useCallback(
+    (i: number) => {
+      const c = t?.clips[i];
+      if (c) {
+        setSelectedId(c.id);
+        setIndexHint(i);
+      }
+    },
+    [t],
   );
 
   const select = useCallback(
@@ -116,12 +128,6 @@ export function EditorPage({ id, store }: { id: string; store?: DraftStore }) {
     );
 
   const total = t.clips.reduce((n, c) => n + c.duration_s, 0);
-  const preview = clip.image_asset_id
-    ? assets.find((a) => a.id === clip.image_asset_id)
-    : undefined;
-  const footage = clip.video_asset_id
-    ? assets.find((a) => a.id === clip.video_asset_id)
-    : undefined;
 
   return (
     <section className="editor">
@@ -242,34 +248,17 @@ export function EditorPage({ id, store }: { id: string; store?: DraftStore }) {
         </div>
       )}
 
-      <div
-        className={`editor-preview aspect-${t.aspect_ratio.replace(":", "x")}`}
-        aria-label="Preview"
-      >
-        {footage ? (
-          <video
-            src={assetUrl(footage.project_id, footage.id)}
-            muted
-            playsInline
-            loop
-            autoPlay
-            style={{ objectPosition: `${clip.focal.x * 100}% ${clip.focal.y * 100}%` }}
-          />
-        ) : preview ? (
-          <img
-            src={assetUrl(preview.project_id, preview.id)}
-            alt=""
-            style={{ objectPosition: `${clip.focal.x * 100}% ${clip.focal.y * 100}%` }}
-          />
-        ) : (
-          <div className="preview-card">
-            {clip.caption ?? (clip.voice.text || clip.description)}
-          </div>
-        )}
-        <span className="preview-meta">
-          Scene {index + 1} of {t.clips.length} · {total.toFixed(1)} s total
-        </span>
-      </div>
+      <PreviewPlayer
+        projectId={id}
+        title={project?.title ?? ""}
+        timeline={t}
+        assets={assets}
+        selectedIndex={index}
+        onTimeScene={followPlayhead}
+      />
+      <span className="small muted preview-meta-line">
+        Scene {index + 1} of {t.clips.length} · {total.toFixed(1)} s planned
+      </span>
 
       <div className="zoom">
         <button

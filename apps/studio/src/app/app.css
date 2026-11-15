@@ -1277,3 +1277,35 @@ h3 {
   font-weight: 600;
   color: var(--muted);
 }
+.preview-player {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+}
+.transport {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: min(100%, 420px);
+}
+.transport input[type="range"] {
+  flex: 1;
+}
+.transport .time {
+  font-size: 13px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.voice-note {
+  margin: 0;
+  text-align: center;
+}
+.preview-meta-line {
+  text-align: center;
+}
+@media (min-width: 900px) {
+  .preview-player {
+    grid-area: preview;
+  }
+}
