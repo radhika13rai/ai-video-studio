@@ -17,7 +17,11 @@ export interface NarrationClip {
 export async function mixNarration(
   clips: NarrationClip[],
   totalSeconds: number,
-  opts: { music?: boolean | { mood: MusicMood; tempo_bpm: number } } = {},
+  opts: {
+    music?: boolean | { mood: MusicMood; tempo_bpm: number };
+    /** Transition effects, synthesized here (no files, no licences). */
+    sfx?: { at: number; kind: "whoosh" | "hit" }[];
+  } = {},
 ): Promise<Uint8Array> {
   const length = Math.max(1, Math.ceil(totalSeconds * SAMPLE_RATE));
   const ctx = new OfflineAudioContext(2, length, SAMPLE_RATE);
@@ -47,6 +51,8 @@ export async function mixNarration(
         opts.music === true ? undefined : opts.music.tempo_bpm,
       ),
     );
+  for (const cue of opts.sfx ?? [])
+    if (cue.at < totalSeconds - 0.1) (cue.kind === "whoosh" ? addWhoosh : addHit)(ctx, cue.at);
   const rendered = await ctx.startRendering();
   return encodeWav([rendered.getChannelData(0), rendered.getChannelData(1)], SAMPLE_RATE);
 }
@@ -223,4 +229,46 @@ export async function decodeAudio(bytes: ArrayBuffer): Promise<AudioBuffer | nul
   } catch {
     return null;
   }
+}
+
+/** Filtered noise sweeping upwards: an air "whoosh" for whip, slide and zoom transitions. */
+function addWhoosh(ctx: OfflineAudioContext, at: number): void {
+  const seconds = 0.5;
+  const noise = ctx.createBuffer(1, Math.ceil(seconds * ctx.sampleRate), ctx.sampleRate);
+  const data = noise.getChannelData(0);
+  let seed = 1234567 + Math.round(at * 1000);
+  for (let i = 0; i < data.length; i++) {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff; // deterministic, so renders are repeatable
+    data[i] = (seed / 0x7fffffff) * 2 - 1;
+  }
+  const src = ctx.createBufferSource();
+  src.buffer = noise;
+  const band = ctx.createBiquadFilter();
+  band.type = "bandpass";
+  band.Q.value = 0.8;
+  band.frequency.setValueAtTime(350, at);
+  band.frequency.exponentialRampToValueAtTime(3200, at + seconds);
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.0001, at);
+  // Band-passed noise keeps only a slice of its energy, so the peak gain is high (≈ −16 dB out).
+  gain.gain.exponentialRampToValueAtTime(0.9, at + seconds * 0.55);
+  gain.gain.exponentialRampToValueAtTime(0.0001, at + seconds);
+  src.connect(band).connect(gain).connect(ctx.destination);
+  src.start(at);
+  src.stop(at + seconds);
+}
+
+/** A soft low thump for flash transitions. */
+function addHit(ctx: OfflineAudioContext, at: number): void {
+  const osc = ctx.createOscillator();
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(110, at);
+  osc.frequency.exponentialRampToValueAtTime(45, at + 0.25);
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.0001, at);
+  gain.gain.exponentialRampToValueAtTime(0.22, at + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.3);
+  osc.connect(gain).connect(ctx.destination);
+  osc.start(at);
+  osc.stop(at + 0.32);
 }

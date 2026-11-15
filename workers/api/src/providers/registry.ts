@@ -11,6 +11,7 @@ import {
 } from "../db";
 import type { Env } from "../env";
 import { paidSettings, planRoute, secretOf, startOfUtcDay, type RoutePlan } from "./policy";
+import { PexelsStockVideo } from "./pexels";
 import { WorkersAiFluxImage } from "./workers-ai";
 import {
   ProviderError,
@@ -32,10 +33,12 @@ export function setMediaProvidersOverride(providers: MediaProvider[] | null): vo
 /** Providers implemented in code for this environment (usable or not; see `isUsable`). */
 export function codeProviders(env: Env): MediaProvider[] {
   if (override) return override;
+  if (env.AI_MEDIA_PROVIDER === "none") return [];
   const out: MediaProvider[] = [];
-  if ((env.AI_MEDIA_PROVIDER ?? "workers-ai") === "workers-ai" && env.AI)
-    // SDXL-Lightning and MeloTTS were removed: Cloudflare retires both on 2026-11-20 (ADR 039).
-    out.push(new WorkersAiFluxImage(env.AI));
+  // SDXL-Lightning and MeloTTS were removed: Cloudflare retires both on 2026-11-20 (ADR 039).
+  if (env.AI) out.push(new WorkersAiFluxImage(env.AI));
+  // Free stock footage; skipped by routing until the PEXELS_API_KEY secret is set (ADR 041).
+  out.push(new PexelsStockVideo(() => secretOf(env, "PEXELS_API_KEY")));
   return out;
 }
 
@@ -90,6 +93,12 @@ export interface Attempt {
   detail?: string;
 }
 
+/** "provider: outcome – why", with the provider's own name trimmed from the reason. */
+function describeAttempt(a: Attempt): string {
+  const why = a.detail?.replace(new RegExp(`^${a.provider}: `), "").slice(0, 120);
+  return `${a.provider}: ${a.outcome}${why && a.outcome !== "ok" ? ` – ${why}` : ""}`;
+}
+
 export class NoProviderError extends Error {
   constructor(
     readonly capability: MediaCapability,
@@ -100,7 +109,7 @@ export class NoProviderError extends Error {
     super(
       attempts.length === 0
         ? `No ${capability} provider is configured.`
-        : `No ${capability} provider could produce it (${attempts.map((a) => `${a.provider}: ${a.outcome}`).join(", ")}).`,
+        : `No ${capability} provider could produce it (${attempts.map(describeAttempt).join(", ")}).`,
     );
     this.name = "NoProviderError";
   }

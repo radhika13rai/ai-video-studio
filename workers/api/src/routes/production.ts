@@ -88,7 +88,7 @@ export function registerProductionRoutes(router: Router<Ctx>): void {
       try {
         await env.PRODUCTION_WORKFLOW.create({
           id: runId,
-          params: { projectId, userId: user.id, runId, blueprint: 1 },
+          params: { projectId, userId: user.id, runId, blueprint: 1, media: 2 },
         });
       } catch (err) {
         console.error("Workflow create failed", err);

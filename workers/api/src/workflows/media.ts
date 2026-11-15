@@ -2,8 +2,11 @@ import type { AspectRatio } from "@avs/types";
 import { createAsset, deleteAsset, listAssets, listScenes, updateSceneStatus } from "../db";
 import type { Env } from "../env";
 import { generateMedia, hasCodeProvider, NoProviderError } from "../providers/registry";
-/** The per-scene media the production workflow makes today. */
-type MediaCapability = "image" | "voice";
+import type { MediaRequest } from "../providers/types";
+import { stockQuery } from "../providers/pexels";
+
+/** The per-scene media the production workflow makes. */
+type MediaCapability = "image" | "voice" | "video";
 import { runAgentJob, type StepContext } from "./steps";
 
 export interface SceneRef {
@@ -12,6 +15,9 @@ export interface SceneRef {
   visual_prompt: string | null;
   voiceover: string | null;
   visual_type: string;
+  /** Present for runs prepared after stock video was added. */
+  description?: string;
+  duration_seconds?: number;
 }
 
 export type MediaOutcome =
@@ -36,6 +42,8 @@ export async function prepareMediaStage(ctx: StepContext, env: Env): Promise<Sce
     visual_prompt: s.visual_prompt,
     voiceover: s.voiceover,
     visual_type: s.visual_type,
+    description: s.description,
+    duration_seconds: s.duration_seconds,
   }));
 }
 
@@ -43,7 +51,38 @@ export async function prepareMediaStage(ctx: StepContext, env: Env): Promise<Sce
 export const BROWSER_VOICE_REASON =
   "Narration is voiced in the browser (Kokoro) when the video renders.";
 
-const AGENT: Record<MediaCapability, string> = { image: "visual-artist", voice: "voice-director" };
+const AGENT: Record<MediaCapability, string> = {
+  image: "visual-artist",
+  voice: "voice-director",
+  video: "footage-scout",
+};
+const JOB_TYPE: Record<MediaCapability, string> = {
+  image: "generate_image",
+  voice: "generate_voiceover",
+  video: "find_stock_video",
+};
+const ASSET_TYPE: Record<MediaCapability, "image" | "voiceover" | "video"> = {
+  image: "image",
+  voice: "voiceover",
+  video: "video",
+};
+
+/** The typed provider request for one scene's medium. */
+function requestFor(
+  scene: SceneRef,
+  capability: MediaCapability,
+  aspect: AspectRatio,
+): MediaRequest {
+  if (capability === "image")
+    return { capability, prompt: scene.visual_prompt ?? "", aspect_ratio: aspect };
+  if (capability === "voice") return { capability, text: scene.voiceover ?? "" };
+  return {
+    capability,
+    prompt: stockQuery(scene.description || scene.visual_prompt || ""),
+    aspect_ratio: aspect,
+    duration_seconds: scene.duration_seconds ?? 5,
+  };
+}
 
 /**
  * Generates one scene's image or narration, stores it in R2 and records the asset, as a tracked
@@ -57,12 +96,14 @@ export async function produceSceneMedia(
   capability: MediaCapability,
   aspect: AspectRatio,
 ): Promise<MediaOutcome> {
-  if (capability === "image" && (scene.visual_type === "text" || !scene.visual_prompt))
+  if (capability !== "voice" && (scene.visual_type === "text" || !scene.visual_prompt))
     return { status: "skipped", reason: "Scene is a text card by design." };
   if (capability === "voice" && !scene.voiceover?.trim())
     return { status: "skipped", reason: "Scene has no narration." };
   if (capability === "voice" && !hasCodeProvider(env, "voice"))
     return { status: "skipped", reason: BROWSER_VOICE_REASON };
+  if (capability === "video" && !stockQuery(scene.description || scene.visual_prompt || ""))
+    return { status: "fallback", reason: "Nothing to search stock footage for." };
 
   const keyStem = `${runPrefix(ctx)}scene-${scene.scene_number}-${capability}.`;
   const existing = (await listAssets(ctx.db, ctx.userId, ctx.projectId)).find((a) =>
@@ -76,7 +117,7 @@ export async function produceSceneMedia(
   return runAgentJob<MediaOutcome>(
     ctx,
     AGENT[capability],
-    capability === "image" ? "generate_image" : "generate_voiceover",
+    JOB_TYPE[capability],
     null,
     async () => {
       try {
@@ -84,22 +125,20 @@ export async function produceSceneMedia(
           ctx.db,
           env,
           { userId: ctx.userId, projectId: ctx.projectId },
-          capability === "image"
-            ? { capability, prompt: scene.visual_prompt ?? "", aspect_ratio: aspect }
-            : { capability, text: scene.voiceover ?? "" },
+          requestFor(scene, capability, aspect),
         );
         const storage_key = `${keyStem}${result.extension}`;
         await media.put(storage_key, result.bytes, {
           httpMetadata: { contentType: result.mime_type },
         });
         const asset = await createAsset(ctx.db, ctx.userId, ctx.projectId, {
-          asset_type: capability === "image" ? "image" : "voiceover",
+          asset_type: ASSET_TYPE[capability],
           storage_key,
           mime_type: result.mime_type,
           file_size: result.bytes.byteLength,
           scene_id: scene.id,
           source_provider: provider,
-          license: { source: "generated", provider, model: result.model },
+          license: result.license ?? { source: "generated", provider, model: result.model },
           metadata: {
             model: result.model,
             ...(result.width ? { width: result.width, height: result.height } : {}),
@@ -131,16 +170,33 @@ export async function markSceneReady(ctx: StepContext, sceneId: string): Promise
   await updateSceneStatus(ctx.db, ctx.userId, sceneId, "ready");
 }
 
+export interface SceneOutcome {
+  scene: number;
+  image: MediaOutcome;
+  voice: MediaOutcome;
+  /** Stock footage (video-style projects; absent for older runs). */
+  video?: MediaOutcome;
+}
+
 /** Plain-language notes about anything that didn't go as the brief asked. */
 export function summarizeFallbacks(
   visualStyle: "image" | "video" | "animation",
   narration: boolean,
-  outcomes: { scene: number; image: MediaOutcome; voice: MediaOutcome }[],
+  outcomes: SceneOutcome[],
 ): string[] {
   const notes: string[] = [];
-  if (visualStyle !== "image")
+  const triedVideo = outcomes.filter((o) => o.video && o.video.status !== "skipped");
+  const withVideo = triedVideo.filter((o) => o.video?.status === "ok");
+  if (visualStyle === "video" && triedVideo.length > 0) {
+    if (withVideo.length < triedVideo.length)
+      notes.push(
+        `${withVideo.length} of ${triedVideo.length} scenes use stock footage from Pexels; the others use generated still images with motion effects (${reasonOf(triedVideo.find((o) => o.video?.status !== "ok")?.video)}).`,
+      );
+  } else if (visualStyle !== "image")
     notes.push(
-      `No ${visualStyle} generator is available on the free tier; scenes use generated still images with motion effects instead.`,
+      visualStyle === "video"
+        ? "No video source is set up (add a free Pexels key for stock footage); scenes use generated still images with motion effects instead."
+        : "No animation generator is available on the free tier; scenes use generated still images with motion effects instead.",
     );
   const noImage = outcomes.filter((o) => o.image.status === "fallback");
   if (noImage.length > 0)
@@ -167,9 +223,9 @@ export async function regenerateSceneMedia(
   env: Env,
   scene: SceneRef,
   aspect: AspectRatio,
-  capabilities: MediaCapability[],
-): Promise<Record<MediaCapability, MediaOutcome | undefined>> {
-  const out: Record<MediaCapability, MediaOutcome | undefined> = {
+  capabilities: ("image" | "voice")[],
+): Promise<Record<"image" | "voice", MediaOutcome | undefined>> {
+  const out: Record<"image" | "voice", MediaOutcome | undefined> = {
     image: undefined,
     voice: undefined,
   };
@@ -203,9 +259,7 @@ export async function regenerateSceneMedia(
             ctx.db,
             env,
             { userId: ctx.userId, projectId: ctx.projectId },
-            capability === "image"
-              ? { capability, prompt: scene.visual_prompt ?? "", aspect_ratio: aspect }
-              : { capability, text: scene.voiceover ?? "" },
+            requestFor(scene, capability, aspect),
           );
           // Only replace the old file once the new one exists.
           const type = capability === "image" ? "image" : "voiceover";

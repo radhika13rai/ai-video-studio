@@ -269,6 +269,10 @@ export const renderManifestSchema = z.object({
         on_screen_text: z.string().max(80).nullable().optional(),
         image_url: z.string().nullable(),
         voice_url: z.string().nullable(),
+        /** Stock footage for the scene (absent: picture or text card). */
+        video_url: z.string().nullable().optional(),
+        /** Attribution for the scene's footage, e.g. "Video by Ann on Pexels". */
+        credit: z.string().max(200).nullable().optional(),
       }),
     )
     .min(1)

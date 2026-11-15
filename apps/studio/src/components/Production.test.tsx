@@ -53,3 +53,33 @@ describe("Creative Director in the storyboard", () => {
     expect(screen.getByText("Main points")).toBeTruthy();
   });
 });
+
+describe("stock footage in the storyboard", () => {
+  it("plays a scene's clip and credits its creator, linking to the source", () => {
+    const video = {
+      id: "v1",
+      project_id: "p",
+      scene_id: "s1",
+      asset_type: "video" as const,
+      storage_key: "k",
+      mime_type: "video/mp4",
+      file_size: 1,
+      source_provider: "pexels-video",
+      license: {
+        source: "pexels",
+        credit: "Video by Ann Diver on Pexels",
+        page_url: "https://www.pexels.com/video/jellyfish-42/",
+      },
+      metadata: {},
+      created_at: "2026-11-15T00:00:00Z",
+    };
+    const { container } = render(
+      <SceneList scenes={[scene(1)]} assets={[video]} onRetry={() => undefined} retrying={null} />,
+    );
+    expect(container.querySelector("video")?.getAttribute("src")).toMatch(/\/assets\/v1\/content$/);
+    const link = screen.getByRole("link", { name: "Video by Ann Diver on Pexels" });
+    expect(link.getAttribute("href")).toBe("https://www.pexels.com/video/jellyfish-42/");
+    // A scene with footage needs no image, so nothing to retry.
+    expect(screen.queryByRole("button", { name: "Retry media" })).toBeNull();
+  });
+});

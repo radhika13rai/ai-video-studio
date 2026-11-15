@@ -23,7 +23,8 @@ import {
 export type Ctx2D = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
 
 export interface SceneMedia {
-  image: ImageBitmap | null;
+  /** The scene's picture: a still image, or the current frame of its stock clip. */
+  image: ImageBitmap | HTMLCanvasElement | OffscreenCanvas | null;
   /** Caption lines with per-word timing (seconds from the scene start). */
   words: TimedWord[][];
   /** True when the parallax renderer has this scene's textures. */
@@ -79,6 +80,7 @@ export function paintFrame(ctx: Ctx2D, fc: FrameContext, frame: number): void {
   if (frame < 2.4 * FPS) paintTitle(ctx, w, h, fc.title, frame / FPS);
   else if (current.scene.on_screen_text)
     paintLabel(ctx, w, h, current.scene.on_screen_text, seconds);
+  if (current.scene.credit) paintCredit(ctx, w, h, current.scene.credit);
   paintProgress(ctx, w, h, frame / Math.max(1, fc.totalFrames - 1));
   if (fc.grain) paintGrain(ctx, w, h, fc.grain, frame);
 
@@ -457,5 +459,19 @@ function paintGrain(ctx: Ctx2D, w: number, h: number, tiles: CanvasPattern[], fr
   const oy = Math.floor(hash01(frame, 2) * 160);
   ctx.translate(-ox, -oy);
   ctx.fillRect(0, 0, w + ox, h + oy);
+  ctx.restore();
+}
+
+/** A small attribution line for stock footage, bottom left. */
+function paintCredit(ctx: Ctx2D, w: number, h: number, credit: string): void {
+  const size = Math.round(Math.min(w, h) * 0.022);
+  ctx.save();
+  ctx.font = `500 ${size}px ${FONT}`;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "bottom";
+  ctx.fillStyle = "rgba(255,255,255,0.7)";
+  ctx.shadowColor = "rgba(0,0,0,0.6)";
+  ctx.shadowBlur = size / 2;
+  ctx.fillText(credit.slice(0, 80), size, h - size * 1.6);
   ctx.restore();
 }

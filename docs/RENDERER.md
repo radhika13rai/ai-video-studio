@@ -109,6 +109,26 @@ a copy of the ONNX `.wasm` into the build; it's unused (the runtime is pointed a
 - **Music:** generated in code (no licences): a C–G–Am–F pad, soft bass and plucked arpeggio at
   90 bpm, low-passed, ducked from 0.16 to 0.06 under narration. Optional in the render panel.
 
+## Stock footage and sound effects
+
+- A scene with `video_url` plays its clip (ADR 041). The clip is downloaded with the pictures but
+  decoded only while its scene (or a transition into or out of it) is on screen, then released,
+  so a phone holds at most two clips at once. For each output frame the hidden `<video>` is
+  seeked to the exact time and copied into a canvas that the painter draws like a picture, with
+  the planned camera move (no 3D depth). Seeking frame by frame is slower than playback but never
+  drops or repeats frames.
+- A clip shorter than its scene plays in slow motion to fill it (never loops); a longer one plays
+  from the start at normal speed.
+- A clip that can't be downloaded or decoded is listed in `missingMedia`; the scene falls back to
+  its picture or a text card.
+- The footage credit ("Video by … on Pexels") is drawn small at the bottom left.
+- Planned transitions get synthesized sound effects (no files, no licences): an air whoosh
+  (band-passed noise sweeping up, peaking just before the cut) for whip, slide and zoom, and a
+  soft low hit for flash. Crossfades and cuts stay silent. `sfx: false` turns them off.
+- Verified in headless Chromium: a moving H.264 clip plays with captions and credit, a broken
+  clip falls back to a text card, the whoosh peaks around −21 dB RMS at the whip and the hit at
+  the flash.
+
 ## Following the Creative Director
 
 When the project has a blueprint, the manifest carries per-scene `shot`, `camera`,
