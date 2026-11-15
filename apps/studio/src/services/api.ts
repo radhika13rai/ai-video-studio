@@ -2,6 +2,7 @@ import type {
   Asset,
   CreateProjectRequest,
   ProviderStatus,
+  ProviderCosts,
   QualityReport,
   RenderManifest,
   GenerateResponse,
@@ -20,6 +21,7 @@ import {
   assetSchema,
   errorEnvelopeSchema,
   providerStatusSchema,
+  providerCostsSchema,
   qualityReportSchema,
   renderManifestSchema,
   generateResponseSchema,
@@ -136,6 +138,8 @@ export const listAssets = (id: string): Promise<Asset[]> =>
   request(API_PATHS.projectAssets(id), z.array(assetSchema));
 export const listProviders = (): Promise<ProviderStatus[]> =>
   request(API_PATHS.providers, z.array(providerStatusSchema));
+export const getProviderCosts = (): Promise<ProviderCosts> =>
+  request(API_PATHS.providerCosts, providerCostsSchema);
 export const assetUrl = (projectId: string, assetId: string) =>
   `${BASE_URL}${API_PATHS.assetContent(projectId, assetId)}`;
 /** Starts a render; `takeover` replaces a render that's running in another tab or device. */

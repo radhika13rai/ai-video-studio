@@ -60,5 +60,9 @@
     "AI_MEDIA_PROVIDER": "workers-ai",
     "MAX_VIDEO_DURATION": "60",
     "MAX_PROJECT_SCENES": "20",
+    // Paid media providers stay off unless this is "on" AND the daily budget is above 0 (ADR 040).
+    // Provider keys are Worker secrets (wrangler secret put), never vars.
+    "PAID_PROVIDERS": "off",
+    "PAID_DAILY_BUDGET_USD": "0",
   },
 }

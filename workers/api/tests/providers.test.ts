@@ -13,7 +13,7 @@ import {
 } from "../src/providers/registry";
 import { ProviderError, type MediaProvider, type MediaRequest } from "../src/providers/types";
 import { WorkersAiFluxImage } from "../src/providers/workers-ai";
-import { db, makeProject, makeUser } from "./helpers";
+import { db, fakeFacts, makeProject, makeUser } from "./helpers";
 
 // Minimal real files: a JPEG header with SOF0 (width 576, height 1024) and a 1-second 8 kHz WAV.
 function jpeg(width = 576, height = 1024): Uint8Array {
@@ -76,6 +76,7 @@ function fake(
   const calls: MediaRequest[] = [];
   const name = `${base}-${crypto.randomUUID().slice(0, 8)}`;
   return {
+    ...fakeFacts(),
     name,
     capability,
     defaultPriority: priority,
@@ -210,7 +211,7 @@ describe("Workers AI adapters", () => {
       }),
     ).rejects.toMatchObject({ kind: "quota", retryable: false });
     await expect(
-      new WorkersAiFluxImage(ai({})).generate({ capability: "voice", text: "x" }),
+      new WorkersAiFluxImage(ai({})).generate({ capability: "voice", text: "x" } as never),
     ).rejects.toMatchObject({ kind: "unsupported" });
   });
 });
@@ -490,8 +491,10 @@ describe("GET /providers", () => {
       "text",
       "image",
       "video",
+      "image_to_video",
       "voice",
       "music",
+      "sfx",
     ]);
     expect(data.find((d) => d.provider_name === img.name)).toMatchObject({
       available: true,
@@ -499,7 +502,7 @@ describe("GET /providers", () => {
     });
     expect(data.find((d) => d.capability === "video")).toMatchObject({
       available: false,
-      note: "No free video provider is integrated yet.",
+      note: "No video provider yet; scenes use still images with motion.",
     });
     expect(data.find((d) => d.capability === "text")).toMatchObject({ available: false });
   });

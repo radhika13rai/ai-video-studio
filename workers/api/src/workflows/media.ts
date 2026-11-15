@@ -2,7 +2,8 @@ import type { AspectRatio } from "@avs/types";
 import { createAsset, deleteAsset, listAssets, listScenes, updateSceneStatus } from "../db";
 import type { Env } from "../env";
 import { generateMedia, hasCodeProvider, NoProviderError } from "../providers/registry";
-import type { MediaCapability } from "../providers/types";
+/** The per-scene media the production workflow makes today. */
+type MediaCapability = "image" | "voice";
 import { runAgentJob, type StepContext } from "./steps";
 
 export interface SceneRef {

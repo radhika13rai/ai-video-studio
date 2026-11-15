@@ -10,7 +10,7 @@ import { renderManifestSchema } from "@avs/schemas";
 import { CAMERA_MOVES } from "@avs/types";
 import { env, introspectWorkflow, SELF } from "cloudflare:test";
 import { afterEach, describe, expect, it } from "vitest";
-import { setTextModelOverride } from "./helpers";
+import { fakeFacts, setTextModelOverride } from "./helpers";
 import { getLatestWorkflowRun, listAssets, requireProject, upsertUserByEmail } from "../src/db";
 import { sniffMedia } from "../src/providers/media-bytes";
 import { setMediaProvidersOverride } from "../src/providers/registry";
@@ -66,6 +66,7 @@ const provider = (
   capability: "image" | "voice",
   bytes: () => Uint8Array,
 ): MediaProvider => ({
+  ...fakeFacts(),
   name: `${name}-${crypto.randomUUID().slice(0, 6)}`,
   capability,
   defaultPriority: 10,

@@ -71,3 +71,16 @@ export function withCreativeDirector(model: TextModel): TextModel {
 export function setTextModelOverride(model: TextModel | null) {
   setRawTextModelOverride(model ? withCreativeDirector(model) : null);
 }
+
+/** The provider facts a test fake doesn't care about: a free, sync, keyless provider. */
+export function fakeFacts() {
+  return {
+    mode: "sync" as const,
+    tier: "free" as const,
+    cost: { unit: "request" as const, usd_per_unit: 0, source: "test" },
+    limits: {},
+    timeoutMs: 5_000,
+    credential: null,
+    commercialUse: true,
+  };
+}

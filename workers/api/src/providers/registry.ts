@@ -1,17 +1,25 @@
 import {
   listProvidersForCapability,
+  paidSpendSince,
+  recordProviderFailure,
+  recordProviderSuccess,
   recordUsage,
-  setProviderHealth,
+  releaseUsage,
+  reservePaidSpend,
+  settleUsage,
   sumProviderUsageSince,
 } from "../db";
 import type { Env } from "../env";
+import { paidSettings, planRoute, secretOf, startOfUtcDay, type RoutePlan } from "./policy";
 import { WorkersAiFluxImage } from "./workers-ai";
 import {
   ProviderError,
+  withTimeout,
   type MediaCapability,
   type MediaProvider,
   type MediaRequest,
   type MediaResult,
+  type SyncMediaProvider,
 } from "./types";
 
 let override: MediaProvider[] | null = null;
@@ -21,17 +29,25 @@ export function setMediaProvidersOverride(providers: MediaProvider[] | null): vo
   override = providers;
 }
 
-/** Providers implemented in code and usable in this environment. */
+/** Providers implemented in code for this environment (usable or not; see `isUsable`). */
 export function codeProviders(env: Env): MediaProvider[] {
   if (override) return override;
-  if ((env.AI_MEDIA_PROVIDER ?? "workers-ai") !== "workers-ai" || !env.AI) return [];
-  // SDXL-Lightning and MeloTTS were removed: Cloudflare retires both on 2026-11-20 (ADR 039).
-  return [new WorkersAiFluxImage(env.AI)];
+  const out: MediaProvider[] = [];
+  if ((env.AI_MEDIA_PROVIDER ?? "workers-ai") === "workers-ai" && env.AI)
+    // SDXL-Lightning and MeloTTS were removed: Cloudflare retires both on 2026-11-20 (ADR 039).
+    out.push(new WorkersAiFluxImage(env.AI));
+  return out;
 }
 
-/** True when this deploy has at least one provider in code for the capability. */
+/** Has its key (if it needs one) and, if paid, paid generation is switched on. */
+export function isUsable(env: Env, provider: MediaProvider): boolean {
+  if (provider.credential && !secretOf(env, provider.credential)) return false;
+  return provider.tier === "free" || paidSettings(env).enabled;
+}
+
+/** True when this deploy has a usable provider for the capability (ignoring health). */
 export function hasCodeProvider(env: Env, capability: MediaCapability): boolean {
-  return codeProviders(env).some((p) => p.capability === capability);
+  return codeProviders(env).some((p) => p.capability === capability && isUsable(env, p));
 }
 
 /**
@@ -60,11 +76,17 @@ export async function syncRegistry(db: D1Database, providers: MediaProvider[]): 
   );
 }
 
-const startOfUtcDay = () => `${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`;
-
 export interface Attempt {
   provider: string;
-  outcome: "ok" | "quota" | "failed" | "over_daily_limit";
+  outcome:
+    | "ok"
+    | "quota"
+    | "failed"
+    | "timeout"
+    | "over_daily_limit"
+    | "over_budget"
+    | "cooling_down"
+    | "skipped";
   detail?: string;
 }
 
@@ -84,9 +106,96 @@ export class NoProviderError extends Error {
   }
 }
 
+const SKIP_OUTCOME: Record<RoutePlan["skipped"][number]["reason"], Attempt["outcome"]> = {
+  disabled: "skipped",
+  unsupported: "skipped",
+  no_credential: "skipped",
+  paid_off: "skipped",
+  wrong_mode: "skipped",
+  over_budget: "over_budget",
+  cooling_down: "cooling_down",
+  over_daily_limit: "over_daily_limit",
+};
+
+/** Gathers the inputs and plans the route for a request (no provider is called). */
+export async function routeFor(
+  db: D1Database,
+  env: Env,
+  userId: string,
+  request: MediaRequest,
+  opts: { mode?: "sync" | "async"; exclude?: ReadonlySet<string>; now?: Date } = {},
+): Promise<RoutePlan & { providers: MediaProvider[] }> {
+  const now = opts.now ?? new Date();
+  const providers = codeProviders(env).filter((p) => p.capability === request.capability);
+  await syncRegistry(db, providers);
+  const rows = await listProvidersForCapability(db, request.capability);
+  const day = startOfUtcDay(now);
+  const usedToday = new Map<string, number>();
+  for (const p of providers)
+    usedToday.set(p.name, (await sumProviderUsageSince(db, p.name, p.capability, day)).units);
+  const spend = providers.some((p) => p.tier === "paid")
+    ? await paidSpendSince(db, userId, day)
+    : { total_usd: 0, user_usd: 0 };
+  const plan = planRoute({
+    request,
+    providers,
+    rows,
+    usedToday,
+    spend,
+    paid: paidSettings(env),
+    hasCredential: (p) => secretOf(env, p.credential) !== null,
+    ...(opts.mode ? { mode: opts.mode } : {}),
+    ...(opts.exclude ? { exclude: opts.exclude } : {}),
+    now,
+  });
+  return { ...plan, providers };
+}
+
+/** How a failure changes the provider's registry state (circuit breaker, ADR 040). */
+export async function noteFailure(
+  db: D1Database,
+  provider: Pick<MediaProvider, "name" | "capability">,
+  err: ProviderError,
+  now = new Date(),
+): Promise<void> {
+  if (err.kind === "unsupported") return;
+  if (err.kind === "quota")
+    // Out of allowance isn't broken: pause until it resets (or 10 minutes), no failure counted.
+    return recordProviderFailure(
+      db,
+      provider.name,
+      provider.capability,
+      {
+        message: err.message,
+        countsAsFailure: false,
+        pauseUntil: err.retryAt ?? new Date(now.getTime() + 10 * 60_000).toISOString(),
+      },
+      now,
+    );
+  return recordProviderFailure(
+    db,
+    provider.name,
+    provider.capability,
+    {
+      message: err.message,
+      countsAsFailure: true,
+      // A refused key won't fix itself: pause for an hour.
+      ...(err.kind === "auth"
+        ? { pauseUntil: new Date(now.getTime() + 60 * 60_000).toISOString() }
+        : {}),
+    },
+    now,
+  );
+}
+
+const outcomeOf = (err: ProviderError): Attempt["outcome"] =>
+  err.kind === "quota" ? "quota" : err.kind === "timeout" ? "timeout" : "failed";
+
 /**
- * Tries providers in registry order (enabled, healthy first, then priority), skipping any that
- * reached their daily cap. Records usage and health. Throws NoProviderError when none succeed.
+ * Produces media with the first provider that can (sync providers only; long-running providers
+ * go through jobs.ts). Providers are tried in route order; each call has a time limit; paid calls
+ * reserve their estimated cost within the budget first. Records usage (estimated and actual
+ * cost) and health. Throws NoProviderError when none succeed.
  */
 export async function generateMedia(
   db: D1Database,
@@ -94,54 +203,64 @@ export async function generateMedia(
   owner: { userId: string; projectId: string },
   request: MediaRequest,
 ): Promise<{ result: MediaResult; provider: string; attempts: Attempt[] }> {
-  const available = codeProviders(env).filter((p) => p.capability === request.capability);
-  await syncRegistry(db, available);
-  const rows = await listProvidersForCapability(db, request.capability);
-  const byName = new Map(available.map((p) => [p.name, p]));
-  const attempts: Attempt[] = [];
+  const plan = await routeFor(db, env, owner.userId, request, { mode: "sync" });
+  const attempts: Attempt[] = plan.skipped
+    .filter((s) => s.reason !== "wrong_mode")
+    .map((s) => ({ provider: s.provider, outcome: SKIP_OUTCOME[s.reason], detail: s.detail }));
+  // A pause or a cap ends today or soon, so a later retry may work; other skips won't change.
   let retryable = false;
+  const budget = paidSettings(env);
+  const day = startOfUtcDay();
 
-  for (const row of rows) {
-    const provider = byName.get(row.provider_name);
-    if (!provider) continue; // registry row for a provider this deploy doesn't have
-    const limit = typeof row.quota.daily_limit === "number" ? row.quota.daily_limit : Infinity;
-    const used = await sumProviderUsageSince(
-      db,
-      provider.name,
-      request.capability,
-      startOfUtcDay(),
-    );
-    if (used.units >= limit) {
-      attempts.push({
-        provider: provider.name,
-        outcome: "over_daily_limit",
-        detail: `${used.units}/${limit} today`,
-      });
-      continue;
+  for (const { provider: p, estimated_cost_usd } of plan.candidates) {
+    const provider = p as SyncMediaProvider;
+    let reservation: string | null = null;
+    if (provider.tier === "paid") {
+      reservation = await reservePaidSpend(
+        db,
+        owner.userId,
+        owner.projectId,
+        {
+          provider_name: provider.name,
+          capability: provider.capability,
+          unit_type: provider.cost.unit,
+          estimated_cost_usd,
+        },
+        { daily_usd: budget.daily_usd, user_daily_usd: budget.user_daily_usd, since: day },
+      );
+      if (!reservation) {
+        attempts.push({ provider: provider.name, outcome: "over_budget" });
+        continue;
+      }
     }
     try {
-      const result = await provider.generate(request);
-      await recordUsage(db, owner.userId, owner.projectId, {
-        provider_name: provider.name,
-        capability: request.capability,
-        units_used: result.units,
-        unit_type: result.unit_type,
-      });
-      if (row.health_status !== "healthy")
-        await setProviderHealth(db, provider.name, request.capability, "healthy");
+      const result = await withTimeout(provider.name, provider.timeoutMs, (signal) =>
+        provider.generate(request as never, signal),
+      );
+      if (reservation)
+        await settleUsage(db, reservation, {
+          units_used: result.units,
+          actual_cost_usd: result.actual_cost_usd ?? null,
+        });
+      else
+        await recordUsage(db, owner.userId, owner.projectId, {
+          provider_name: provider.name,
+          capability: request.capability,
+          units_used: result.units,
+          unit_type: result.unit_type,
+          estimated_cost_usd,
+          actual_cost_usd: result.actual_cost_usd ?? null,
+          tier: provider.tier,
+        });
+      await recordProviderSuccess(db, provider.name, request.capability);
       attempts.push({ provider: provider.name, outcome: "ok" });
       return { result, provider: provider.name, attempts };
     } catch (err) {
+      if (reservation) await releaseUsage(db, reservation);
       if (!(err instanceof ProviderError)) throw err;
-      attempts.push({
-        provider: provider.name,
-        outcome: err.kind === "quota" ? "quota" : "failed",
-        detail: err.message,
-      });
-      if (err.kind !== "quota" && err.kind !== "unsupported") {
-        retryable ||= err.retryable;
-        await setProviderHealth(db, provider.name, request.capability, "degraded");
-      }
+      attempts.push({ provider: provider.name, outcome: outcomeOf(err), detail: err.message });
+      if (err.kind !== "quota" && err.kind !== "unsupported") retryable ||= err.retryable;
+      await noteFailure(db, provider, err);
     }
   }
   throw new NoProviderError(request.capability, attempts, retryable);

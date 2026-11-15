@@ -5,6 +5,7 @@ import {
   PROJECT_STATUSES,
   PROVIDER_CAPABILITIES,
   PROVIDER_HEALTH_STATUSES,
+  PROVIDER_JOB_STATUSES,
   QUALITY_STATUSES,
   SCENE_STATUSES,
   SCENE_VISUAL_TYPES,
@@ -19,6 +20,7 @@ const TABLES = [
   "assets",
   "jobs",
   "projects",
+  "provider_jobs",
   "providers",
   "quality_reports",
   "scenes",
@@ -28,7 +30,7 @@ const TABLES = [
 ];
 
 describe("migrations", () => {
-  it("creates the nine tables and the indexes", async () => {
+  it("creates the tables and the indexes", async () => {
     const { results } = await db()
       .prepare(
         "SELECT name, type FROM sqlite_master WHERE type IN ('table','index') AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%'",
@@ -233,5 +235,24 @@ describe("migrations", () => {
     await expect(
       d.prepare("UPDATE providers SET health_status = 'bogus' WHERE id = 'p1'").run(),
     ).rejects.toThrow(/CHECK/i);
+    for (const c of PROVIDER_CAPABILITIES)
+      await d.prepare("UPDATE providers SET capability = ? WHERE id = 'p1'").bind(c).run();
+
+    // provider_jobs statuses match PROVIDER_JOB_STATUSES; a job belongs to a project.
+    await d
+      .prepare(
+        `INSERT INTO provider_jobs (id, user_id, project_id, provider_name, capability, job_key, deadline_at)
+         VALUES ('j1', ?, ?, 'x', 'video', 'k', '2030-01-01T00:00:00Z')`,
+      )
+      .bind(u.id, p.id)
+      .run();
+    for (const st of PROVIDER_JOB_STATUSES)
+      await d.prepare("UPDATE provider_jobs SET status = ? WHERE id = 'j1'").bind(st).run();
+    await expect(
+      d.prepare("UPDATE provider_jobs SET status = 'bogus' WHERE id = 'j1'").run(),
+    ).rejects.toThrow(/CHECK/i);
+    await expect(d.prepare("UPDATE usage_events SET tier = 'bogus'").run()).rejects.toThrow(
+      /CHECK/i,
+    );
   });
 });

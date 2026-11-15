@@ -6,6 +6,7 @@ import {
   SCENE_TRANSITIONS,
   SHOT_SIZES,
   PROVIDER_CAPABILITIES,
+  PROVIDER_TIERS,
   PROVIDER_HEALTH_STATUSES,
   QUALITY_STATUSES,
   JOB_STATUSES,
@@ -201,8 +202,44 @@ export const providerStatusSchema = z.object({
   daily_limit: z.number().nullable(),
   used_today: z.number(),
   note: z.string().nullable(),
+  /** Facts the provider declares in code (null for text and empty capabilities). */
+  tier: z.enum(PROVIDER_TIERS).nullable().optional(),
+  mode: z.enum(["sync", "async"]).nullable().optional(),
+  cost_unit: z.string().nullable().optional(),
+  usd_per_unit: z.number().nullable().optional(),
+  commercial_use: z.boolean().nullable().optional(),
+  /** Whether the provider's key is set (never the key). Null when it needs none. */
+  credential_set: z.boolean().nullable().optional(),
+  /** Circuit breaker state. */
+  consecutive_failures: z.number().optional(),
+  cooldown_until: z.string().nullable().optional(),
+  last_error: z.string().nullable().optional(),
 });
 export type ProviderStatus = z.infer<typeof providerStatusSchema>;
+
+const costLineSchema = z.object({
+  provider_name: z.string(),
+  capability: z.enum(PROVIDER_CAPABILITIES),
+  tier: z.enum(PROVIDER_TIERS),
+  calls: z.number(),
+  units: z.number(),
+  estimated_usd: z.number(),
+  actual_usd: z.number().nullable(),
+});
+
+/** GET /api/v1/providers/costs: paid settings, today's spend and per-provider totals. */
+export const providerCostsSchema = z.object({
+  paid: z.object({
+    enabled: z.boolean(),
+    daily_budget_usd: z.number(),
+    user_daily_budget_usd: z.number(),
+    spent_today_usd: z.number(),
+    you_spent_today_usd: z.number(),
+  }),
+  today: z.array(costLineSchema),
+  last_30_days: z.array(costLineSchema),
+});
+export type ProviderCosts = z.infer<typeof providerCostsSchema>;
 
 /** POST /api/v1/projects/:id/render: everything the browser needs to render the video. */
 export const renderManifestSchema = z.object({

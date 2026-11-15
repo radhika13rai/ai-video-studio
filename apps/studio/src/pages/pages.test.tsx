@@ -594,3 +594,93 @@ describe("quality report and scene retry", () => {
     ).toEqual([API_PATHS.sceneRetryMedia(p.id, "s1")]);
   });
 });
+
+describe("status page", () => {
+  it("shows provider tiers, pauses and generation costs", async () => {
+    const soon = new Date(Date.now() + 10 * 60_000).toISOString();
+    stubApi(
+      me,
+      route("GET", /\/health$/, () =>
+        ok({
+          status: "ok",
+          service: "api",
+          version: "1",
+          environment: "test",
+          bindings: {
+            database: { status: "ok" },
+            storage: { status: "ok" },
+            workflows: { status: "ok" },
+          },
+        }),
+      ),
+      route("GET", API_PATHS.providers, () =>
+        ok([
+          {
+            capability: "image",
+            provider_name: "workers-ai-flux",
+            available: true,
+            enabled: true,
+            health_status: "down",
+            priority: 10,
+            daily_limit: 60,
+            used_today: 4,
+            note: null,
+            tier: "free",
+            mode: "sync",
+            cost_unit: "image",
+            usd_per_unit: 0.000634,
+            commercial_use: true,
+            credential_set: null,
+            consecutive_failures: 3,
+            cooldown_until: soon,
+            last_error: "HTTP 503",
+          },
+          {
+            capability: "sfx",
+            provider_name: null,
+            available: false,
+            enabled: false,
+            health_status: "unknown",
+            priority: null,
+            daily_limit: null,
+            used_today: 0,
+            note: "No sound-effect provider yet.",
+          },
+        ]),
+      ),
+      route("GET", API_PATHS.providerCosts, () =>
+        ok({
+          paid: {
+            enabled: false,
+            daily_budget_usd: 0,
+            user_daily_budget_usd: 0,
+            spent_today_usd: 0,
+            you_spent_today_usd: 0,
+          },
+          today: [],
+          last_30_days: [
+            {
+              provider_name: "workers-ai-flux",
+              capability: "image",
+              tier: "free",
+              calls: 12,
+              units: 12,
+              estimated_usd: 0.0076,
+              actual_usd: null,
+            },
+          ],
+        }),
+      ),
+    );
+    goTo("/status");
+    render(<App />);
+    expect(await screen.findByText(/Paused until .*HTTP 503/)).toBeTruthy();
+    expect(screen.getByText("Sound effects")).toBeTruthy();
+    expect(screen.getByText(/Free · \$0\.0006 per image/)).toBeTruthy();
+    expect(
+      await screen.findByText("Paid providers are off. Only free providers are used."),
+    ).toBeTruthy();
+    expect(screen.getByText("$0.0076")).toBeTruthy();
+    expect(screen.getByText("not reported")).toBeTruthy();
+  });
+});

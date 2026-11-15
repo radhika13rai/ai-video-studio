@@ -66,15 +66,54 @@ quality check warns.
 ### Registry and fallback
 
 `generateMedia` syncs code providers into the `providers` table, inserting rows that are missing
-and never overwriting edits. It then tries enabled providers in order: healthy first, then by
-priority.
+and never overwriting edits (ADR 040).
 
-- A provider at its daily cap is skipped.
-- A quota error moves on to the next provider.
-- A transient failure marks the provider `degraded` and moves on.
-- Success records usage and marks the provider `healthy`.
-- When nothing works it throws `NoProviderError`, listing every attempt, with `retryable` set if a
-  later retry could help.
+**Capabilities are separate.** `image`, `video`, `image_to_video`, `voice`, `music` and `sfx`
+each have one typed request (`MediaRequest`). A provider declares exactly one capability, so an
+image provider is never offered a video request.
+
+**Every provider declares its facts in code** (`ProviderFacts` in `providers/types.ts`):
+
+| Fact            | Meaning                                                                                 |
+| --------------- | --------------------------------------------------------------------------------------- |
+| `tier`          | `free` or `paid`. Paid runs only with `PAID_PROVIDERS=on` and budget left               |
+| `cost`          | Unit (`image`, `second`, `1k_chars`, `minute`, `request`, `clip`), USD per unit, source |
+| `limits`        | Aspect ratios, min/max clip length, max prompt or text length                           |
+| `timeoutMs`     | Time limit for each call (each submit or poll for async providers)                      |
+| `credential`    | Name of the Worker secret holding the key, or null (never the key itself)               |
+| `commercialUse` | Whether the output may be used commercially under the provider's terms                  |
+| `mode`          | `sync` (`generate`) or `async` (`submit` + `poll`, with `maxWaitSeconds`)               |
+
+**Routing** (`planRoute`, a pure function) skips a provider that is switched off, can't take the
+request (capability or limits), has no key, is paused, is at its daily cap, or is paid while paid
+generation is off or the call would pass today's budget. The rest are ordered by health
+(healthy, unknown, degraded, down), then priority, then estimated cost. Every skip is recorded
+with its reason in `NoProviderError.attempts`.
+
+**Failures** (circuit breaker, state in `providers`):
+
+- Each call runs under `withTimeout`; no answer in time is a `timeout` failure.
+- A failure increments `consecutive_failures` and marks the provider `degraded`. At 3 it is
+  `down` and paused (`cooldown_until`): 5 minutes, doubling per further failure, at most 1 hour.
+  After the pause it is tried again; a success resets everything.
+- A quota error isn't counted as a failure: the provider is paused until `retryAt` (Workers AI:
+  the next 00:00 UTC, when the free allocation resets) or 10 minutes.
+- A refused key (`auth`) pauses the provider for an hour.
+
+**Costs.** Each usage row stores `tier`, `estimated_cost_usd` (units × price, before the call) and
+`actual_cost_usd` (when the provider's API reports it). Paid calls first reserve their estimate
+with one conditional INSERT that succeeds only within both budgets (`PAID_DAILY_BUDGET_USD`,
+`PAID_USER_DAILY_BUDGET_USD`), so concurrent calls can't overspend; the row is settled after the
+call or removed if it failed. `GET /providers/costs` shows the paid settings, today's spend and
+per-provider totals for today and the last 30 days.
+
+**Long-running jobs** (`providers/jobs.ts`, table `provider_jobs`): `startMediaJob` submits to the
+best async provider (idempotent per job key, reserving paid cost); `pollMediaJob` polls once,
+stores the result through a callback and records usage, or marks the job failed or timed out at
+its deadline (releasing the reservation). Finished jobs never change. In a Workflow,
+`runMediaJob` runs submit and each poll as durable steps with `step.sleep` between them (at most
+30 polls per attempt) and tries the next provider after a failure, up to 3 attempts, then returns
+a fallback.
 
 In the workflow, each scene's image and narration is its own durable step and tracked job
 (`visual-artist`, `voice-director`). A transient failure retries the step. When no provider can
@@ -84,9 +123,13 @@ image (…); they will render as styled text cards"). Files go to
 when a new run reaches this stage.
 
 `GET /projects/:id/assets/:assetId/content` streams a file from the private bucket, only to the
-project's owner. `GET /providers` lists every capability with its availability, health and usage
-today.
+project's owner. `GET /providers` lists every capability with its providers' availability,
+health, tier, price, pause state and usage today; `GET /providers/costs` shows spend.
 
 ### Switches
+
+`PAID_PROVIDERS` (`off` by default) and `PAID_DAILY_BUDGET_USD` (`0` by default) are plain
+variables in `wrangler.jsonc`. Paid providers run only when the first is `on` and the second is
+above 0; `PAID_USER_DAILY_BUDGET_USD` optionally caps each user (default: the daily budget).
 
 `AI_MEDIA_PROVIDER` is `workers-ai` when deployed and `none` under `pnpm dev` and in tests.

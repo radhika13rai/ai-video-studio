@@ -17,6 +17,7 @@ export const API_PATHS = {
   assetContent: (projectId: string, assetId: string) =>
     `${API_PREFIX}/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}/content`,
   providers: `${API_PREFIX}/providers`,
+  providerCosts: `${API_PREFIX}/providers/costs`,
   projectRender: (id: string) => `${API_PREFIX}/projects/${encodeURIComponent(id)}/render`,
   projectRenderUpload: (id: string, renderRequestId: string) =>
     `${API_PREFIX}/projects/${encodeURIComponent(id)}/render/upload?render_request_id=${encodeURIComponent(renderRequestId)}`,
@@ -205,6 +206,7 @@ export type {
   Job,
   Project,
   ProviderStatus,
+  ProviderCosts,
   QualityReport,
   RenderManifest,
   ProjectPage,

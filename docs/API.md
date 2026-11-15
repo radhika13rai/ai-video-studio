@@ -47,6 +47,8 @@ Every endpoint except `/health` needs a signed-in user. See `SECURITY.md`.
 | POST | `/projects/:id/generate` | optional `Idempotency-Key` | 202 `{ project_id, workflow_run_id, status: "planning" }` |
 | POST | `/projects/:id/cancel` | – | The cancelled project |
 | GET | `/projects/:id/run` | – | Latest workflow run or `null` |
+| GET | `/providers` | – | Every capability with its providers: availability, health, tier, price, pause state, usage today |
+| GET | `/providers/costs` | – | `{ paid: { enabled, daily_budget_usd, user_daily_budget_usd, spent_today_usd, you_spent_today_usd }, today, last_30_days }` |
 
 `status` can't be changed through `PATCH`; the production workflow owns it.
 

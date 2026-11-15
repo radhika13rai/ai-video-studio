@@ -47,8 +47,13 @@ Within a project, only the browser render holding the current attempt token (fro
 ## Secrets
 
 - No credentials in source control, `.env.example`, D1 or the frontend.
-- Provider keys will be Worker secrets (`wrangler secret put`), added only for providers actually
-  integrated.
+- Provider keys are Worker secrets (`wrangler secret put NAME`). Each provider declares only the
+  secret's _name_ (`credential`); `secretOf` reads it at call time. Keys never go to D1, logs,
+  API responses or the browser: `GET /providers` reports only `credential_set: true/false`. A
+  provider whose secret is unset is skipped. `providers.quota_metadata` rejects credential-like
+  keys.
+- Paid providers also need `PAID_PROVIDERS="on"` and a daily budget above 0 (plain variables,
+  off by default); each paid call reserves its estimated cost atomically within the budget.
 - The R2 bucket is private; media will be served through authenticated endpoints (Task 9).
 
 ## Not yet done
