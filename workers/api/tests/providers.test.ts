@@ -175,12 +175,16 @@ describe("Workers AI adapters", () => {
     expect(r.width).toBe(1024);
   });
 
-  it("registers only FLUX: SDXL-Lightning and MeloTTS are retired by Cloudflare (ADR 039)", () => {
+  it("registers FLUX and Pexels only: SDXL-Lightning and MeloTTS are retired (ADR 039)", () => {
     setMediaProvidersOverride(null);
     const live = { ...env, AI_MEDIA_PROVIDER: "workers-ai", AI: ai({}) } as unknown as typeof env;
-    expect(codeProviders(live).map((p) => p.name)).toEqual(["workers-ai-flux"]);
+    expect(codeProviders(live).map((p) => p.name)).toEqual(["workers-ai-flux", "pexels-video"]);
     expect(hasCodeProvider(live, "image")).toBe(true);
     expect(hasCodeProvider(live, "voice")).toBe(false);
+    // Stock video is usable only once its key is set.
+    expect(hasCodeProvider(live, "video")).toBe(false);
+    expect(hasCodeProvider({ ...live, PEXELS_API_KEY: "k" } as typeof env, "video")).toBe(true);
+    expect(codeProviders({ ...live, AI_MEDIA_PROVIDER: "none" } as typeof env)).toEqual([]);
   });
 
   it("rejects wrong media, missing media and classifies quota errors", async () => {
@@ -466,7 +470,7 @@ describe("workflow with media providers", () => {
     const project = await requireProject(env.DB, user.id, projectId);
     expect(project.status).toBe("awaiting_render");
     const notes = project.production_config.fallbacks as string[];
-    expect(notes[0]).toMatch(/No video generator is available on the free tier/);
+    expect(notes[0]).toMatch(/No video source is set up \(add a free Pexels key/);
     expect(notes[1]).toMatch(/2 of 3 scenes have no generated image .*quota.*styled text cards/);
   }, 30_000);
 });

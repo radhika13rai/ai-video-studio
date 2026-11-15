@@ -33,7 +33,9 @@ import {
   produceSceneMedia,
   summarizeFallbacks,
   type MediaOutcome,
+  type SceneOutcome,
 } from "./media";
+import { hasCodeProvider } from "../providers/registry";
 import { runQualityChecks } from "../quality/check";
 import { r2Reader } from "../quality/mp4";
 import { agentStepConfig, runAgentJob, stableUuid, type StepContext } from "./steps";
@@ -52,6 +54,8 @@ const paramsSchema = z.object({
    * still be waiting for a render) skip its steps, so their replay is unchanged.
    */
   blueprint: z.literal(1).optional(),
+  /** 2: video-style projects try stock footage per scene before images (ADR 041). */
+  media: z.literal(2).optional(),
 });
 export type ProductionParams = z.infer<typeof paramsSchema>;
 
@@ -101,6 +105,7 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, ProductionParams
     if (!parsed.success) throw new NonRetryableError("Invalid workflow parameters.");
     const { projectId, userId, runId } = parsed.data;
     const creativeDirector = parsed.data.blueprint === 1;
+    const mediaV2 = parsed.data.media === 2;
     const db = this.env.DB;
     if (!db) throw new NonRetryableError("The database binding is missing.");
     const ctx: StepContext = { db, userId, projectId, runId };
@@ -254,10 +259,17 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, ProductionParams
         return prepareMediaStage(ctx, this.env);
       });
 
+      // Video-style projects try stock footage first, when a video provider is usable. Decided
+      // once, in a step, so a key added mid-run can't change the path on replay.
+      const useVideo =
+        mediaV2 && plan.visual_style === "video"
+          ? await step.do("video-plan", async () => hasCodeProvider(this.env, "video"))
+          : false;
+
       // One durable step per scene and medium: a failure on scene 5 never redoes scenes 1–4.
-      const outcomes: { scene: number; image: MediaOutcome; voice: MediaOutcome }[] = [];
+      const outcomes: SceneOutcome[] = [];
       for (const scene of scenes) {
-        const media = async (capability: "image" | "voice"): Promise<MediaOutcome> => {
+        const media = async (capability: "image" | "voice" | "video"): Promise<MediaOutcome> => {
           if (capability === "voice" && !plan.narration)
             return { status: "skipped", reason: "No narration planned." };
           try {
@@ -272,9 +284,15 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, ProductionParams
             return { status: "fallback", reason: message.slice(0, 200) };
           }
         };
-        const image = await media("image");
+        const video: MediaOutcome = useVideo
+          ? await media("video")
+          : { status: "skipped", reason: "Not a video-style project." };
+        const image: MediaOutcome =
+          video.status === "ok"
+            ? { status: "skipped", reason: "Scene uses stock footage." }
+            : await media("image");
         const voice = await media("voice");
-        outcomes.push({ scene: scene.scene_number, image, voice });
+        outcomes.push({ scene: scene.scene_number, image, voice, video });
       }
 
       const fallbacks = await step.do("summarize-assets", async () => {

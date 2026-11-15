@@ -272,3 +272,15 @@ settled with the actual cost or released on failure. Async providers use `provid
 "degraded" forever, recorded every cost as $0 and had no way to keep paid providers in check or
 to wait for multi-minute video jobs. Keeping routing pure and the facts in code makes each
 provider replaceable and testable without a vendor.
+
+## 041. Free stock footage from Pexels; frame-accurate clips and synthesized sound effects (2026-11-15)
+
+Video-style projects get real motion from Pexels stock footage, a free API (key required,
+200 requests/hour, 20,000/month, commercial use allowed). It is registered as a `video` provider
+with `credential: "PEXELS_API_KEY"`, so routing skips it until the secret exists. The workflow
+tries footage first only for video-style projects and only for runs started with `media: 2`
+(replay safety); the decision is taken in a step. The renderer decodes clips lazily and seeks
+per frame. Transition effects are synthesized in the mix. **Why:** no free generative video API
+is reliable enough (ADR 040's research), and real footage is the free way to get true motion;
+Freesound was rejected because its API is non-commercial only, and synthesized effects need no
+licence at all.

@@ -183,6 +183,20 @@ export function SceneList({
         {scenes.map((s) => (
           <li key={s.id} className="scene">
             {(() => {
+              const video = forScene(s.id, "video");
+              if (video)
+                return (
+                  <video
+                    className="scene-image"
+                    src={assetUrl(video.project_id, video.id)}
+                    muted
+                    loop
+                    playsInline
+                    controls
+                    preload="metadata"
+                    aria-label={`Stock footage for scene ${s.scene_number}`}
+                  />
+                );
               const image = forScene(s.id, "image");
               return image ? (
                 <img
@@ -217,6 +231,25 @@ export function SceneList({
               {s.voiceover && <p className="voiceover">“{s.voiceover}”</p>}
               {s.visual_prompt && <p className="visual muted">🎨 {s.visual_prompt}</p>}
               {(() => {
+                const video = forScene(s.id, "video");
+                const lic = video?.license ?? null;
+                const credit = typeof lic?.credit === "string" ? lic.credit : null;
+                const page = typeof lic?.page_url === "string" ? lic.page_url : null;
+                if (!credit) return null;
+                return (
+                  <p className="small muted">
+                    🎬{" "}
+                    {page ? (
+                      <a href={page} target="_blank" rel="noreferrer noopener">
+                        {credit}
+                      </a>
+                    ) : (
+                      credit
+                    )}
+                  </p>
+                );
+              })()}
+              {(() => {
                 const voice = forScene(s.id, "voiceover");
                 return voice ? (
                   <audio
@@ -232,7 +265,8 @@ export function SceneList({
               {onRetry &&
                 s.visual_type !== "text" &&
                 s.visual_prompt &&
-                !forScene(s.id, "image") && (
+                !forScene(s.id, "image") &&
+                !forScene(s.id, "video") && (
                   <button
                     type="button"
                     className="btn small retry"

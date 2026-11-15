@@ -14,6 +14,8 @@ export interface Env {
   AI_TEXT_PROVIDER?: string;
   /** "workers-ai" (default) or "none" to disable image and voice generation. */
   AI_MEDIA_PROVIDER?: string;
+  /** Pexels API key (Worker secret, `wrangler secret put PEXELS_API_KEY`). Enables stock video. */
+  PEXELS_API_KEY?: string;
   /** "on" lets paid providers run (still only within the budgets below). Default off. */
   PAID_PROVIDERS?: string;
   /** Most all paid generation may cost per UTC day, in USD (default 0 = none). */

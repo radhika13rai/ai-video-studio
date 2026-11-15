@@ -102,6 +102,9 @@ export function registerRenderRoutes(router: Router<Ctx>): void {
     const scenes = (await listScenes(db, user.id, projectId)).map((s) => {
       const image = assets.find((a) => a.scene_id === s.id && a.asset_type === "image");
       const voice = assets.find((a) => a.scene_id === s.id && a.asset_type === "voiceover");
+      const video = assets.find((a) => a.scene_id === s.id && a.asset_type === "video");
+      const credit =
+        video && typeof video.license?.credit === "string" ? video.license.credit : null;
       const scene = {
         scene_number: s.scene_number,
         start_seconds: Math.round(start * 1000) / 1000,
@@ -111,6 +114,7 @@ export function registerRenderRoutes(router: Router<Ctx>): void {
         narration: (s.voiceover ?? "").trim() || null,
         image_url: image ? url(image.id) : null,
         voice_url: voice ? url(voice.id) : null,
+        ...(video ? { video_url: url(video.id), credit } : {}),
         ...(() => {
           const d = direction.get(s.scene_number);
           return d

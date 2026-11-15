@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.7.0 (2026-11-15)
+
+- Free stock footage: video-style projects (advertisement, cinematic, presenter) use a real
+  Pexels clip per scene when the free `PEXELS_API_KEY` secret is set, and a generated image when
+  no clip fits. Each clip is credited on the scene card and in the video.
+- The renderer plays footage frame-accurately (clips are decoded only while on screen) and adds
+  synthesized whooshes and hits on whip, slide, zoom and flash transitions.
+- Provider failure notes now say why ("no stock clip found for …"), not just "failed".
+
 ## 1.6.0 (2026-11-15)
 
 - Capability-aware providers: seven separate capabilities (text, image, video, image-to-video,

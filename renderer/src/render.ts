@@ -6,9 +6,18 @@ import { JpegFramesSink, pickWebCodecsConfig, WebCodecsSink, type FrameSink } fr
 import { assembleMp4, loadFFmpeg } from "./ffmpeg";
 import { makeGrain, paintFrame, type FrameContext, type SceneMedia } from "./painter";
 import { ParallaxRenderer } from "./parallax";
-import { buildTimeline, FPS, outputSize, wordGroups, wordTimings, type Quality } from "./timeline";
+import {
+  buildTimeline,
+  FPS,
+  outputSize,
+  TRANSITION_FRAMES,
+  wordGroups,
+  wordTimings,
+  type Quality,
+} from "./timeline";
 import { startModelWorker, type ModelWorker } from "./ml";
 import { BACKUP_VOICE, DEFAULT_VOICE, fitSpeed, type Speech } from "./voice";
+import { clipTime, loadClip, sfxCues, type VideoClip } from "./video";
 
 export type RenderStage = "loading" | "frames" | "audio" | "encoding" | "done";
 
@@ -33,6 +42,8 @@ export interface RenderOptions {
   narrator?: "kokoro" | "provider";
   /** Soft generated background music under the voice (default on). */
   music?: boolean;
+  /** Whooshes and hits on planned transitions (default on). */
+  sfx?: boolean;
   /** 3D-depth camera moves (default on; falls back to flat moves if unavailable). */
   depth?: boolean;
   /** Override the on-device model time limits in milliseconds (tests). */
@@ -54,6 +65,8 @@ export interface RenderResult {
   /** Scenes that had narration text. */
   narrationScenes: number;
   motion: "depth" | "flat";
+  /** Scenes that used stock footage. */
+  videoScenes: number;
   notes: string[];
 }
 
@@ -103,6 +116,30 @@ export async function renderVideo(
     images.push(image);
   }
 
+  // Stock footage: downloaded now, decoded only while its scene is on screen (phones have
+  // little memory). A clip that won't load falls back to the scene's picture, if it has one.
+  const footage: Footage[] = [];
+  for (const [i, s] of scenes.entries()) {
+    check(opts.signal);
+    let blob: Blob | null = null;
+    if (s.video_url) {
+      report({
+        stage: "loading",
+        progress: 0.02,
+        detail: `Downloading footage for scene ${i + 1}`,
+      });
+      try {
+        const res = await doFetch(s.video_url, fetchInit);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        blob = await res.blob();
+      } catch (e) {
+        if (opts.signal?.aborted) throw e;
+        missing.push(`Scene ${s.scene_number} footage (${errText(e)})`);
+      }
+    }
+    footage.push({ blob, clip: null, state: blob ? "waiting" : "none", used: false });
+  }
+
   const parallax = images.some(Boolean) ? ParallaxRenderer.create(width, height) : null;
   let motion: RenderResult["motion"] = "flat";
   if (parallax) {
@@ -136,7 +173,7 @@ export async function renderVideo(
       }
       for (const [i, image] of images.entries()) {
         check(opts.signal);
-        if (!image) continue;
+        if (!image || footage[i]?.blob) continue;
         let depth: DepthMap | null = null;
         const blob = blobs[i];
         if (worker && depthReady && !worker.stopped && blob) {
@@ -182,10 +219,11 @@ export async function renderVideo(
     const words = v
       ? wordTimings(text, 0.05, Math.min(v.duration, dur - 0.05))
       : wordTimings(text, 0.2, Math.max(0.5, dur - 0.5));
+    const hasFootage = !!footage[i]?.blob;
     return {
-      image: images[i] ?? null,
-      words: wordGroups(words, images[i] ? 4 : 6),
-      gpu: !!parallax?.has(i),
+      image: images[i] ?? null, // replaced by the clip's frame while it plays
+      words: wordGroups(words, hasFootage || images[i] ? 4 : 6),
+      gpu: !hasFootage && !!parallax?.has(i),
     };
   });
 
@@ -219,6 +257,7 @@ export async function renderVideo(
           detail: `Frame ${f} of ${totalFrames}`,
         });
       }
+      await syncFootage(footage, media, timeline, f, missing, scenes);
       paintFrame(ctx, fc, f);
       await sink.addFrame(canvas, f);
     }
@@ -236,7 +275,18 @@ export async function renderVideo(
         maxSeconds: t.frameCount / FPS,
       })),
       durationSeconds,
-      { music: opts.music === false ? false : (manifest.music ?? true) },
+      {
+        music: opts.music === false ? false : (manifest.music ?? true),
+        sfx:
+          opts.sfx === false
+            ? []
+            : sfxCues(
+                timeline.slice(1).map((t) => ({
+                  seconds: t.startFrame / FPS,
+                  transition: t.scene.transition_in,
+                })),
+              ),
+      },
     );
     report({ stage: "audio", progress: 1 });
 
@@ -258,6 +308,7 @@ export async function renderVideo(
       missingMedia: missing,
       narration: voices.kind,
       narratedScenes: voices.voiced,
+      videoScenes: footage.filter((x) => x.used).length,
       narrationScenes: manifest.scenes.filter((s) => s.narration?.trim()).length,
       motion,
       notes,
@@ -265,7 +316,8 @@ export async function renderVideo(
   } finally {
     sink.close();
     parallax?.dispose();
-    for (const m of media) m.image?.close();
+    for (const m of media) if (m.image && "close" in m.image) m.image.close();
+    for (const x of footage) x.clip?.dispose();
   }
 }
 
@@ -405,4 +457,53 @@ async function voiceScenes(
     voiced: scenes.filter((s, i) => s.narration?.trim() && buffers[i]).length,
     kind: usedKokoro ? "kokoro" : usedProvider ? "provider" : "none",
   };
+}
+
+interface Footage {
+  blob: Blob | null;
+  clip: VideoClip | null;
+  state: "none" | "waiting" | "playing" | "done" | "failed";
+  used: boolean;
+}
+
+/**
+ * Before painting `frame`: opens the clip of every scene on screen (its own frames, or a
+ * transition into or out of it), seeks it to the right time and points the scene's picture at
+ * it; closes clips whose scene is over (frames only move forward).
+ */
+async function syncFootage(
+  footage: Footage[],
+  media: SceneMedia[],
+  timeline: { startFrame: number; frameCount: number }[],
+  frame: number,
+  missing: string[],
+  scenes: RenderManifest["scenes"],
+): Promise<void> {
+  for (const [i, x] of footage.entries()) {
+    const t = timeline[i];
+    const m = media[i];
+    if (!t || !m || x.state === "none" || x.state === "done" || x.state === "failed") continue;
+    const end = t.startFrame + t.frameCount + TRANSITION_FRAMES;
+    if (frame >= end) {
+      x.clip?.dispose();
+      x.clip = null;
+      x.state = "done";
+      continue;
+    }
+    if (frame < t.startFrame - TRANSITION_FRAMES) continue;
+    if (!x.clip) {
+      try {
+        x.clip = await loadClip(x.blob as Blob);
+        x.state = "playing";
+        x.used = true;
+        m.image = x.clip.frame;
+      } catch (e) {
+        x.state = "failed";
+        missing.push(`Scene ${scenes[i]?.scene_number ?? i + 1} footage (${errText(e)})`);
+        continue;
+      }
+    }
+    const local = Math.max(0, frame - t.startFrame) / FPS;
+    await x.clip.seek(clipTime(local, t.frameCount / FPS, x.clip.duration));
+  }
 }

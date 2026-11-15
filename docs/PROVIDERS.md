@@ -38,12 +38,12 @@ an account and the `AI` binding is unavailable. With `wrangler login` done, `pnp
 `MediaProvider.generate(request)` returns bytes plus their sniffed type, size or duration, and usage
 units. It throws `ProviderError` (`quota`, `unavailable`, `bad_response`, `unsupported`).
 
-| Capability | Provider (registry name) | Model                                            | Order | Daily cap* | Notes                                                                                                                 |
-| ---------- | ------------------------ | ------------------------------------------------ | ----- | ---------- | --------------------------------------------------------------------------------------------------------------------- |
-| image      | `workers-ai-flux`        | `@cf/black-forest-labs/flux-1-schnell` (4 steps) | 1     | 60         | Best prompt-following in testing. Square 1024², so 9:16 is cropped by the renderer; prompts ask for a centred subject |
-| voice      | none                     | –                                                | –     | –          | Voiced by Kokoro in the browser at render time (ADR 033, 039)                                                         |
-| video      | none                     | –                                                | –     | –          | No free video model; recorded fallback: still images with motion effects                                              |
-| music      | none                     | –                                                | –     | –          | Not integrated                                                                                                        |
+| Capability | Provider (registry name) | Model                                              | Order | Daily cap* | Notes                                                                                                                 |
+| ---------- | ------------------------ | -------------------------------------------------- | ----- | ---------- | --------------------------------------------------------------------------------------------------------------------- |
+| image      | `workers-ai-flux`        | `@cf/black-forest-labs/flux-1-schnell` (4 steps)   | 1     | 60         | Best prompt-following in testing. Square 1024², so 9:16 is cropped by the renderer; prompts ask for a centred subject |
+| voice      | none                     | –                                                  | –     | –          | Voiced by Kokoro in the browser at render time (ADR 033, 039)                                                         |
+| video      | `pexels-video`           | Pexels video search (stock footage, not generated) | 1     | 400        | Free with a key (`PEXELS_API_KEY` secret); 200 requests/hour, 20,000/month. Video-style projects only (ADR 041)       |
+| music      | none                     | –                                                  | –     | –          | Not integrated                                                                                                        |
 
 \*Our own safety caps, stored in `providers.quota_metadata.daily_limit` and editable in D1. They
 are not Cloudflare's numbers; the real free-tier limit (Neurons per day) still applies and surfaces
@@ -125,6 +125,24 @@ when a new run reaches this stage.
 `GET /projects/:id/assets/:assetId/content` streams a file from the private bucket, only to the
 project's owner. `GET /providers` lists every capability with its providers' availability,
 health, tier, price, pause state and usage today; `GET /providers/costs` shows spend.
+
+### Stock footage (Pexels)
+
+Video-style projects (advertisement, cinematic, presenter) search Pexels for one clip per picture
+scene before generating an image. The search words come from the scene description
+(`stockQuery`: no filler words, at most six). Results are validated one by one; the adapter
+prefers the project's orientation and clips at least as long as the scene, picks the MP4 file
+nearest 720p (never above 1080p), downloads it server-side only from Pexels or Vimeo hosts
+(30 MB cap), checks it is an MP4 with a video track, and stores it in R2 as
+`scene-<n>-video.mp4` with a licence record (creator, page link, "Video by … on Pexels"). When no
+clip is found the scene gets a generated image, and the fallback note says how many scenes use
+footage. The Pexels License allows commercial use; the API terms ask apps to credit Pexels and
+the creator, which the scene card (with a link) and a small line in the video do.
+
+To switch it on, add the free key as a Worker secret (Cloudflare dashboard → Workers → the
+Worker → Settings → Variables and Secrets → add `PEXELS_API_KEY` as a secret, or
+`wrangler secret put PEXELS_API_KEY`). Without it the provider is listed as "Needs the
+PEXELS_API_KEY secret" and never called.
 
 ### Switches
 
