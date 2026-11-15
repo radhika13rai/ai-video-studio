@@ -5,6 +5,7 @@ import { textModelFor } from "../ai/factory";
 import {
   cancelOpenJobs,
   createWorkflowRun,
+  getAsset,
   getLatestWorkflowRun,
   listScenes,
   mergeProductionConfig,
@@ -16,9 +17,18 @@ import { ApiError } from "../lib/errors";
 import { jsonOk } from "../lib/http";
 import { withIdempotency } from "../lib/idempotency";
 import type { Router } from "../lib/router";
-import { refreshFallbacks, regenerateSceneMedia } from "../workflows/media";
+import { readJson } from "../lib/request";
+import { currentTimeline, mediaRunId } from "../timeline";
+import { refreshFallbacks, regenerateSceneMedia, regenerateSceneVersion } from "../workflows/media";
 import { WORKFLOW_NAME } from "../workflows/production-workflow";
 import type { Ctx } from "./projects";
+import { timelineAssetIds } from "@avs/schemas";
+import { z } from "zod";
+
+/** Produced videos whose scenes can be regenerated in the editor. */
+const EDITABLE: ProjectStatus[] = ["awaiting_render", "completed", "failed", "cancelled"];
+/** Produced videos that can be rendered again (awaiting_render renders directly). */
+const EXPORTABLE: ProjectStatus[] = ["completed", "failed", "cancelled"];
 
 /** Statuses from which production may (re)start. */
 export const STARTABLE: readonly ProjectStatus[] = [
@@ -134,9 +144,9 @@ export function registerProductionRoutes(router: Router<Ctx>): void {
       );
     const scene = (await listScenes(db, user.id, projectId)).find((s) => s.id === p.sceneId);
     if (!scene) throw new ApiError(404, "NOT_FOUND", "Scene not found.");
-    const run = await getLatestWorkflowRun(db, user.id, projectId);
-    if (!run) throw new ApiError(409, "INVALID_STATE", "This project has no production run.");
-    const ctx = { db, userId: user.id, projectId, runId: run.id };
+    const runId = await mediaRunId(db, user.id, project);
+    if (!runId) throw new ApiError(409, "INVALID_STATE", "This project has no production run.");
+    const ctx = { db, userId: user.id, projectId, runId };
     const result = await regenerateSceneMedia(
       ctx,
       env,
@@ -158,6 +168,104 @@ export function registerProductionRoutes(router: Router<Ctx>): void {
       voice: result.voice ?? null,
       fallbacks,
     });
+  });
+
+  /**
+   * A new version of one scene's picture for the editor: a fresh image (optionally from an edited
+   * prompt) or another stock clip. Earlier versions are kept (ADR 047).
+   */
+  router.on("POST", `${base}/scenes/:sceneId/regenerate`, async ({ request, env, db, user }, p) => {
+    const projectId = p.id ?? "";
+    const project = await requireProject(db, user.id, projectId);
+    if (!EDITABLE.includes(project.status))
+      throw new ApiError(
+        409,
+        "INVALID_STATE",
+        `Scenes can be regenerated once the video is produced (status: ${project.status}).`,
+      );
+    const body = await readJson(
+      request,
+      z.object({
+        what: z.enum(["image", "footage"]),
+        prompt: z.string().trim().max(1000).nullish(),
+      }),
+    );
+    const scene = (await listScenes(db, user.id, projectId)).find((s) => s.id === p.sceneId);
+    if (!scene) throw new ApiError(404, "NOT_FOUND", "Scene not found.");
+    const runId = await mediaRunId(db, user.id, project);
+    if (!runId) throw new ApiError(409, "INVALID_STATE", "This project has no production run.");
+    const { timeline } = await currentTimeline(db, user.id, project);
+    const inUse = new Set(timelineAssetIds(timeline));
+    const res = await regenerateSceneVersion(
+      { db, userId: user.id, projectId, runId },
+      env,
+      scene,
+      body.what,
+      body.prompt ?? null,
+      timeline.aspect_ratio,
+      inUse,
+    );
+    if (res.outcome.status !== "ok")
+      throw new ApiError(
+        502,
+        "GENERATION_FAILED",
+        res.outcome.status === "fallback" ? res.outcome.reason : "Nothing was generated.",
+        true,
+      );
+    const asset = await getAsset(db, user.id, res.asset_id ?? "");
+    return jsonOk({ scene_id: scene.id, asset }, 201);
+  });
+
+  /**
+   * Renders an already produced (and possibly edited) video again: a render-only run that skips
+   * production and waits for the browser render and the quality check (ADR 047).
+   */
+  router.on("POST", `${base}/export`, async ({ env, db, user }, p) => {
+    const projectId = p.id ?? "";
+    const project = await requireProject(db, user.id, projectId);
+    if (!env.PRODUCTION_WORKFLOW)
+      throw new ApiError(503, "INTERNAL_ERROR", "The workflow service is not configured.", true);
+    if (project.status === "awaiting_render")
+      throw new ApiError(
+        409,
+        "INVALID_STATE",
+        "This video is ready to render: render it from the project page.",
+      );
+    if (!EXPORTABLE.includes(project.status))
+      throw new ApiError(
+        409,
+        "INVALID_STATE",
+        `This video can't be exported now (status: ${project.status}).`,
+      );
+    if (!productionPlanSchema.safeParse(project.production_config.plan).success)
+      throw new ApiError(409, "INVALID_STATE", "Generate the video first.");
+    // Keep pointing at the media run: the export run makes no media of its own.
+    const mediaRun = await mediaRunId(db, user.id, project);
+    if (mediaRun && project.production_config.media_run_id !== mediaRun)
+      await mergeProductionConfig(db, user.id, projectId, { media_run_id: mediaRun });
+    if (!(await setProjectStatusIf(db, user.id, projectId, EXPORTABLE, "generating")))
+      throw new ApiError(409, "INVALID_STATE", "An export was started by another request.", true);
+    const runId = crypto.randomUUID();
+    await createWorkflowRun(db, user.id, projectId, {
+      id: runId,
+      workflow_name: WORKFLOW_NAME,
+      workflow_instance_id: runId,
+    });
+    try {
+      await env.PRODUCTION_WORKFLOW.create({
+        id: runId,
+        params: { projectId, userId: user.id, runId, renderOnly: 1 },
+      });
+    } catch (err) {
+      console.error("Workflow create failed", err);
+      await updateWorkflowRun(db, user.id, runId, {
+        status: "failed",
+        error_message: "Could not start the export.",
+      });
+      await setProjectStatusIf(db, user.id, projectId, ["generating"], project.status);
+      throw new ApiError(503, "INTERNAL_ERROR", "Could not start the export. Try again.", true);
+    }
+    return jsonOk({ project_id: projectId, workflow_run_id: runId, status: "generating" }, 202);
   });
 
   router.on("GET", `${base}/run`, async ({ db, user }, p) => {

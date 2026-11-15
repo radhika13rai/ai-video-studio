@@ -136,7 +136,12 @@ export class PexelsStockVideo implements SyncMediaProvider<"video"> {
       const p = videoSchema.safeParse(v);
       return p.success ? [p.data] : [];
     });
-    const ranked = rankVideos(videos, req.aspect_ratio, req.duration_seconds);
+    const avoid = new Set(req.avoid ?? []);
+    const ranked = rankVideos(
+      videos.filter((v) => !avoid.has(`pexels:${v.id}`)),
+      req.aspect_ratio,
+      req.duration_seconds,
+    );
     const choice = ranked.map((v) => ({ v, f: pickFile(v) })).find((x) => x.f && allowed(x.f.link));
     if (!choice?.f)
       throw new ProviderError(

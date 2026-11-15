@@ -4,6 +4,7 @@ import { NonRetryableError } from "cloudflare:workflows";
 import type { QualityStatus } from "@avs/types";
 import { z } from "zod";
 import { briefSchema, runDirector, runScriptwriter, runStoryboard, type Brief } from "../agents";
+import { productionPlanSchema, type ProductionPlan } from "../agents/director";
 import {
   compose,
   interpretBrief,
@@ -25,6 +26,7 @@ import {
   requireProject,
   setProjectStatusIf,
   updateWorkflowRun,
+  getTimeline,
 } from "../db";
 import type { Env } from "../env";
 import {
@@ -55,6 +57,11 @@ const paramsSchema = z.object({
    * still be waiting for a render) skip its steps, so their replay is unchanged.
    */
   blueprint: z.literal(1).optional(),
+  /**
+   * 1: re-export an already produced video (after editing): skip production and go straight to
+   * the browser render and quality check, using the project's timeline (ADR 047).
+   */
+  renderOnly: z.literal(1).optional(),
   /** 2: video-style projects try stock footage per scene before images (ADR 041). */
   media: z.literal(2).optional(),
 });
@@ -107,6 +114,7 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, ProductionParams
     const { projectId, userId, runId } = parsed.data;
     const creativeDirector = parsed.data.blueprint === 1;
     const mediaV2 = parsed.data.media === 2;
+    const renderOnly = parsed.data.renderOnly === 1;
     const db = this.env.DB;
     if (!db) throw new NonRetryableError("The database binding is missing.");
     const ctx: StepContext = { db, userId, projectId, runId };
@@ -121,205 +129,237 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, ProductionParams
     };
 
     try {
-      const brief = await step.do("load-project", async (): Promise<Brief> => {
-        await ensureActive("load-project");
-        const p = await requireProject(db, userId, projectId);
-        const style = p.production_config.style;
-        return briefSchema.parse({
-          title: p.title,
-          prompt: p.prompt,
-          video_type: p.video_type,
-          aspect_ratio: p.aspect_ratio,
-          duration_seconds: p.duration_seconds,
-          target_platform: p.target_platform,
-          style: typeof style === "string" ? style : null,
-        });
-      });
-
-      const plan = await step.do("director", async () => {
-        await ensureActive("director");
-        const result = await runAgentJob(ctx, "director", "plan_production", null, async () =>
-          runDirector(brief),
-        );
-        await mergeProductionConfig(db, userId, projectId, { plan: result });
-        return result;
-      });
-
-      // Creative Director: interpret the request (model proposal, validated; rules as fallback).
-      // It never fails the run: any model problem falls back to the templates.
-      const interpretation: Interpretation | null = creativeDirector
-        ? await step.do("creative-director", async () => {
-            await ensureActive("creative-director");
-            const model = textModelFor(this.env);
-            const result = await runAgentJob(
-              ctx,
-              "creative-director",
-              "interpret_brief",
-              model,
-              async () => {
-                const { interpretation: output, meta } = await interpretBrief(model, brief, plan);
-                return { output, meta };
-              },
-            );
-            await mergeProductionConfig(db, userId, projectId, { interpretation: result });
-            return result;
-          })
-        : null;
-      const template = TEMPLATES[plan.video_type];
-
-      const script = await step.do("scriptwriter", retry, async () => {
-        await ensureActive("scriptwriter");
-        const model = textModelFor(this.env);
-        if (!model) throw new NonRetryableError("No text model is available in this environment.");
-        const guidance = interpretation
-          ? {
-              beats: template.beats.map((b) => ({ name: b.name, purpose: b.purpose })),
-              key_message: interpretation.key_message,
-              audience: interpretation.audience,
-              call_to_action: interpretation.call_to_action,
-            }
-          : undefined;
-        return runAgentJob(ctx, "scriptwriter", "write_script", model, () =>
-          runScriptwriter(model, { brief, plan, ...(guidance ? { guidance } : {}) }),
-        );
-      });
-
-      const sceneCount = await step.do("storyboard", retry, async () => {
-        await ensureActive("storyboard");
-        const model = textModelFor(this.env);
-        if (!model) throw new NonRetryableError("No text model is available in this environment.");
-        const guidance = interpretation
-          ? {
-              characters: interpretation.characters.map((c) => ({ name: c.name, role: c.role })),
-              shots: template.shots,
-              cameras: template.cameras,
-              transitions: template.transitions,
-            }
-          : undefined;
-        const board = await runAgentJob(ctx, "storyboard", "create_storyboard", model, async () => {
-          const r = await runStoryboard(model, {
-            brief,
-            plan,
-            script,
-            ...(guidance ? { guidance } : {}),
+      let plan: ProductionPlan;
+      let sceneCount: number;
+      let fallbacks: string[];
+      if (renderOnly) {
+        // Re-export: the media exists; render the (edited) timeline again.
+        ({ plan, sceneCount, fallbacks } = await step.do("load-for-export", async () => {
+          await ensureActive("load-for-export");
+          const p = await requireProject(db, userId, projectId);
+          const stored = productionPlanSchema.safeParse(p.production_config.plan);
+          if (!stored.success)
+            throw new NonRetryableError("This project has no production plan to export.");
+          const timeline = await getTimeline(db, userId, projectId);
+          const notes = Array.isArray(p.production_config.fallbacks)
+            ? p.production_config.fallbacks.filter((f): f is string => typeof f === "string")
+            : [];
+          return {
+            plan: stored.data,
+            sceneCount:
+              timeline?.timeline.clips.length ?? (await listScenes(db, userId, projectId)).length,
+            fallbacks: notes,
+          };
+        }));
+      } else {
+        const brief = await step.do("load-project", async (): Promise<Brief> => {
+          await ensureActive("load-project");
+          const p = await requireProject(db, userId, projectId);
+          const style = p.production_config.style;
+          return briefSchema.parse({
+            title: p.title,
+            prompt: p.prompt,
+            video_type: p.video_type,
+            aspect_ratio: p.aspect_ratio,
+            duration_seconds: p.duration_seconds,
+            target_platform: p.target_platform,
+            style: typeof style === "string" ? style : null,
           });
-          await replaceScenes(db, userId, projectId, r.output.scenes);
-          return r;
-        });
-        if (creativeDirector)
-          await mergeProductionConfig(db, userId, projectId, {
-            storyboard_creative: board.creative ?? [],
-          });
-        return board.scenes.length;
-      });
-
-      // Blueprint: deterministic compose + validate. Scenes get consistency-enriched prompts.
-      // A problem here is recorded and production continues with the storyboard as it is.
-      if (interpretation)
-        await step.do("blueprint", async () => {
-          await ensureActive("blueprint");
-          try {
-            const project = await requireProject(db, userId, projectId);
-            const stored = project.production_config.storyboard_creative;
-            const creative = Array.isArray(stored)
-              ? stored.map((c) => storyboardCreativeSchema.safeParse(c).data ?? null)
-              : [];
-            const sceneRows = await listScenes(db, userId, projectId);
-            const blueprint = validateBlueprint(
-              compose({ brief, plan, interpretation, scenes: sceneRows, creative }),
-            );
-            await replaceScenes(
-              db,
-              userId,
-              projectId,
-              sceneRows.map((s, i) => ({
-                scene_number: s.scene_number,
-                description: s.description,
-                visual_prompt: blueprint.scenes[i]?.visual_prompt || s.visual_prompt,
-                voiceover: s.voiceover,
-                duration_seconds: blueprint.scenes[i]?.duration_seconds ?? s.duration_seconds,
-                visual_type: s.visual_type,
-              })),
-            );
-            await mergeProductionConfig(db, userId, projectId, {
-              blueprint,
-              blueprint_error: null,
-            });
-            return { scenes: blueprint.scenes.length, issues: blueprint.issues.length };
-          } catch (err) {
-            const message = err instanceof Error ? err.message.slice(0, 300) : String(err);
-            console.error("Blueprint step failed; continuing with the storyboard", message);
-            await mergeProductionConfig(db, userId, projectId, { blueprint_error: message });
-            return { scenes: 0, issues: 0 };
-          }
         });
 
-      const scenes = await step.do("generate-assets", async () => {
-        await ensureActive("generate-assets");
-        await setProjectStatusIf(db, userId, projectId, ["planning"], "generating");
-        return prepareMediaStage(ctx, this.env);
-      });
+        plan = await step.do("director", async () => {
+          await ensureActive("director");
+          const result = await runAgentJob(ctx, "director", "plan_production", null, async () =>
+            runDirector(brief),
+          );
+          await mergeProductionConfig(db, userId, projectId, { plan: result });
+          return result;
+        });
 
-      // Video-style projects try stock footage first, when a video provider is usable. Decided
-      // once, in a step, so a key added mid-run can't change the path on replay.
-      const useVideo =
-        mediaV2 && plan.visual_style === "video"
-          ? await step.do("video-plan", async () => hasCodeProvider(this.env, "video"))
-          : false;
-
-      // Paid image-to-video, only when switched on with a budget and a key (ADR 042).
-      const useAnimation =
-        mediaV2 && plan.visual_style === "video"
-          ? await step.do("animate-plan", async () => hasCodeProvider(this.env, "image_to_video"))
-          : false;
-
-      // One durable step per scene and medium: a failure on scene 5 never redoes scenes 1–4.
-      const outcomes: SceneOutcome[] = [];
-      for (const scene of scenes) {
-        const media = async (capability: "image" | "voice" | "video"): Promise<MediaOutcome> => {
-          if (capability === "voice" && !plan.narration)
-            return { status: "skipped", reason: "No narration planned." };
-          try {
-            return await step.do(`${capability}-scene-${scene.scene_number}`, retry, async () => {
-              await ensureActive(`${capability}-scene-${scene.scene_number}`);
-              return produceSceneMedia(ctx, this.env, scene, capability, brief.aspect_ratio);
-            });
-          } catch (err) {
-            // Retries used up: keep going with a recorded fallback instead of failing the video.
-            const message = err instanceof Error ? err.message : String(err);
-            if (/^Run is /.test(message)) throw err; // cancelled
-            return { status: "fallback", reason: message.slice(0, 200) };
-          }
-        };
-        const video: MediaOutcome = useVideo
-          ? await media("video")
-          : { status: "skipped", reason: "Not a video-style project." };
-        const image: MediaOutcome =
-          video.status === "ok"
-            ? { status: "skipped", reason: "Scene uses stock footage." }
-            : await media("image");
-        const animated: MediaOutcome =
-          useAnimation && image.status === "ok"
-            ? await animateSceneImage(
-                step,
+        // Creative Director: interpret the request (model proposal, validated; rules as fallback).
+        // It never fails the run: any model problem falls back to the templates.
+        const interpretation: Interpretation | null = creativeDirector
+          ? await step.do("creative-director", async () => {
+              await ensureActive("creative-director");
+              const model = textModelFor(this.env);
+              const result = await runAgentJob(
                 ctx,
-                this.env,
-                scene,
-                image.asset_id,
-                brief.aspect_ratio,
-              )
-            : { status: "skipped", reason: "Not animated." };
-        const voice = await media("voice");
-        outcomes.push({ scene: scene.scene_number, image, voice, video, animated });
-      }
+                "creative-director",
+                "interpret_brief",
+                model,
+                async () => {
+                  const { interpretation: output, meta } = await interpretBrief(model, brief, plan);
+                  return { output, meta };
+                },
+              );
+              await mergeProductionConfig(db, userId, projectId, { interpretation: result });
+              return result;
+            })
+          : null;
+        const template = TEMPLATES[plan.video_type];
 
-      const fallbacks = await step.do("summarize-assets", async () => {
-        await ensureActive("summarize-assets");
-        for (const scene of scenes) await markSceneReady(ctx, scene.id);
-        const notes = summarizeFallbacks(plan.visual_style, plan.narration, outcomes);
-        await mergeProductionConfig(db, userId, projectId, { fallbacks: notes });
-        return notes;
-      });
+        const script = await step.do("scriptwriter", retry, async () => {
+          await ensureActive("scriptwriter");
+          const model = textModelFor(this.env);
+          if (!model)
+            throw new NonRetryableError("No text model is available in this environment.");
+          const guidance = interpretation
+            ? {
+                beats: template.beats.map((b) => ({ name: b.name, purpose: b.purpose })),
+                key_message: interpretation.key_message,
+                audience: interpretation.audience,
+                call_to_action: interpretation.call_to_action,
+              }
+            : undefined;
+          return runAgentJob(ctx, "scriptwriter", "write_script", model, () =>
+            runScriptwriter(model, { brief, plan, ...(guidance ? { guidance } : {}) }),
+          );
+        });
+
+        sceneCount = await step.do("storyboard", retry, async () => {
+          await ensureActive("storyboard");
+          const model = textModelFor(this.env);
+          if (!model)
+            throw new NonRetryableError("No text model is available in this environment.");
+          const guidance = interpretation
+            ? {
+                characters: interpretation.characters.map((c) => ({ name: c.name, role: c.role })),
+                shots: template.shots,
+                cameras: template.cameras,
+                transitions: template.transitions,
+              }
+            : undefined;
+          const board = await runAgentJob(
+            ctx,
+            "storyboard",
+            "create_storyboard",
+            model,
+            async () => {
+              const r = await runStoryboard(model, {
+                brief,
+                plan,
+                script,
+                ...(guidance ? { guidance } : {}),
+              });
+              await replaceScenes(db, userId, projectId, r.output.scenes);
+              return r;
+            },
+          );
+          if (creativeDirector)
+            await mergeProductionConfig(db, userId, projectId, {
+              storyboard_creative: board.creative ?? [],
+            });
+          return board.scenes.length;
+        });
+
+        // Blueprint: deterministic compose + validate. Scenes get consistency-enriched prompts.
+        // A problem here is recorded and production continues with the storyboard as it is.
+        if (interpretation)
+          await step.do("blueprint", async () => {
+            await ensureActive("blueprint");
+            try {
+              const project = await requireProject(db, userId, projectId);
+              const stored = project.production_config.storyboard_creative;
+              const creative = Array.isArray(stored)
+                ? stored.map((c) => storyboardCreativeSchema.safeParse(c).data ?? null)
+                : [];
+              const sceneRows = await listScenes(db, userId, projectId);
+              const blueprint = validateBlueprint(
+                compose({ brief, plan, interpretation, scenes: sceneRows, creative }),
+              );
+              await replaceScenes(
+                db,
+                userId,
+                projectId,
+                sceneRows.map((s, i) => ({
+                  scene_number: s.scene_number,
+                  description: s.description,
+                  visual_prompt: blueprint.scenes[i]?.visual_prompt || s.visual_prompt,
+                  voiceover: s.voiceover,
+                  duration_seconds: blueprint.scenes[i]?.duration_seconds ?? s.duration_seconds,
+                  visual_type: s.visual_type,
+                })),
+              );
+              await mergeProductionConfig(db, userId, projectId, {
+                blueprint,
+                blueprint_error: null,
+              });
+              return { scenes: blueprint.scenes.length, issues: blueprint.issues.length };
+            } catch (err) {
+              const message = err instanceof Error ? err.message.slice(0, 300) : String(err);
+              console.error("Blueprint step failed; continuing with the storyboard", message);
+              await mergeProductionConfig(db, userId, projectId, { blueprint_error: message });
+              return { scenes: 0, issues: 0 };
+            }
+          });
+
+        const scenes = await step.do("generate-assets", async () => {
+          await ensureActive("generate-assets");
+          await setProjectStatusIf(db, userId, projectId, ["planning"], "generating");
+          return prepareMediaStage(ctx, this.env);
+        });
+
+        // Video-style projects try stock footage first, when a video provider is usable. Decided
+        // once, in a step, so a key added mid-run can't change the path on replay.
+        const useVideo =
+          mediaV2 && plan.visual_style === "video"
+            ? await step.do("video-plan", async () => hasCodeProvider(this.env, "video"))
+            : false;
+
+        // Paid image-to-video, only when switched on with a budget and a key (ADR 042).
+        const useAnimation =
+          mediaV2 && plan.visual_style === "video"
+            ? await step.do("animate-plan", async () => hasCodeProvider(this.env, "image_to_video"))
+            : false;
+
+        // One durable step per scene and medium: a failure on scene 5 never redoes scenes 1–4.
+        const outcomes: SceneOutcome[] = [];
+        for (const scene of scenes) {
+          const media = async (capability: "image" | "voice" | "video"): Promise<MediaOutcome> => {
+            if (capability === "voice" && !plan.narration)
+              return { status: "skipped", reason: "No narration planned." };
+            try {
+              return await step.do(`${capability}-scene-${scene.scene_number}`, retry, async () => {
+                await ensureActive(`${capability}-scene-${scene.scene_number}`);
+                return produceSceneMedia(ctx, this.env, scene, capability, brief.aspect_ratio);
+              });
+            } catch (err) {
+              // Retries used up: keep going with a recorded fallback instead of failing the video.
+              const message = err instanceof Error ? err.message : String(err);
+              if (/^Run is /.test(message)) throw err; // cancelled
+              return { status: "fallback", reason: message.slice(0, 200) };
+            }
+          };
+          const video: MediaOutcome = useVideo
+            ? await media("video")
+            : { status: "skipped", reason: "Not a video-style project." };
+          const image: MediaOutcome =
+            video.status === "ok"
+              ? { status: "skipped", reason: "Scene uses stock footage." }
+              : await media("image");
+          const animated: MediaOutcome =
+            useAnimation && image.status === "ok"
+              ? await animateSceneImage(
+                  step,
+                  ctx,
+                  this.env,
+                  scene,
+                  image.asset_id,
+                  brief.aspect_ratio,
+                )
+              : { status: "skipped", reason: "Not animated." };
+          const voice = await media("voice");
+          outcomes.push({ scene: scene.scene_number, image, voice, video, animated });
+        }
+
+        fallbacks = await step.do("summarize-assets", async () => {
+          await ensureActive("summarize-assets");
+          for (const scene of scenes) await markSceneReady(ctx, scene.id);
+          const notes = summarizeFallbacks(plan.visual_style, plan.narration, outcomes);
+          await mergeProductionConfig(db, userId, projectId, { fallbacks: notes });
+          return notes;
+        });
+      }
 
       // Render attempts. Attempt 1 keeps the original step names so runs that were already
       // waiting when retries were added still resume; later attempts get a suffix.
@@ -383,8 +423,16 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, ProductionParams
               "quality_check",
             );
             const reported = video.metadata.reported_duration_seconds;
+            const edited = await getTimeline(db, userId, projectId);
+            const current = await requireProject(db, userId, projectId);
             const report = await runQualityChecks({
-              project: await requireProject(db, userId, projectId),
+              project: edited
+                ? {
+                    ...current,
+                    aspect_ratio: edited.timeline.aspect_ratio,
+                    duration_seconds: edited.timeline.clips.reduce((n, c) => n + c.duration_s, 0),
+                  }
+                : current,
               scenes: await listScenes(db, userId, projectId),
               assets: await listAssets(db, userId, projectId),
               narrationPlanned: plan.narration,

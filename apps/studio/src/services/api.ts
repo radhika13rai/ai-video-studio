@@ -165,6 +165,21 @@ export const restoreTimelineRevision = (
     method: "POST",
     body: { base_revision: baseRevision },
   });
+export const regenerateScene = (
+  id: string,
+  sceneId: string,
+  what: "image" | "footage",
+  prompt: string | null,
+): Promise<{ scene_id: string; asset: Asset }> =>
+  request(
+    `${API_PATHS.project(id)}/scenes/${encodeURIComponent(sceneId)}/regenerate`,
+    z.object({ scene_id: z.string(), asset: assetSchema }),
+    { method: "POST", body: { what, prompt } },
+  );
+export const exportProject = (id: string) =>
+  request(`${API_PATHS.project(id)}/export`, z.object({ status: z.string() }), {
+    method: "POST",
+  });
 export const listProviders = (): Promise<ProviderStatus[]> =>
   request(API_PATHS.providers, z.array(providerStatusSchema));
 export const getProviderCosts = (): Promise<ProviderCosts> =>

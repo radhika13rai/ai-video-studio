@@ -348,3 +348,16 @@ Kokoro narration is not generated automatically (it takes tens of seconds on a p
 asks for it, and lines are cached by content hash so the export and later previews reuse them.
 **Why:** one implementation guarantees the preview matches the exported video, and the cache
 turns the slowest step of rendering into a one-time cost.
+
+## 047. Scene versions, render-only export runs and the media run (2026-11-15)
+
+Regenerating a scene creates a new asset version instead of replacing the old one, so undo and
+the version picker can return to it; versions beyond 3 per scene and kind are deleted, oldest
+first, except those the saved timeline uses (and the one just made). "Another stock clip" passes
+the scene's existing clip ids as `avoid` to the provider. Re-exporting a finished video starts
+the production workflow with `renderOnly: 1`: it loads the stored plan and goes straight to the
+render attempts and quality check (judged against the timeline's length and aspect ratio), so
+upload, completion, retries and QC are reused unchanged. `production_config.media_run_id` records
+the run that made the media (set when a run reaches the media stage, or on the first export for
+older projects), so later runs never hide the project's files. **Why:** reusing the workflow
+keeps one render path with its guarantees, and keeping versions makes regeneration safe to try.

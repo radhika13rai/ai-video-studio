@@ -3,6 +3,7 @@ import {
   createAsset,
   deleteAsset,
   deleteTimeline,
+  mergeProductionConfig,
   listAssets,
   listScenes,
   updateSceneStatus,
@@ -44,6 +45,7 @@ export async function prepareMediaStage(ctx: StepContext, env: Env): Promise<Sce
     await env.MEDIA?.delete(storage_key);
   }
   await deleteTimeline(ctx.db, ctx.userId, ctx.projectId);
+  await mergeProductionConfig(ctx.db, ctx.userId, ctx.projectId, { media_run_id: ctx.runId });
   const scenes = await listScenes(ctx.db, ctx.userId, ctx.projectId);
   return scenes.map((s) => ({
     id: s.id,
@@ -430,4 +432,129 @@ export async function refreshFallbacks(
     return { scene: s.scene_number, image, voice };
   });
   return summarizeFallbacks(visualStyle, narration, outcomes);
+}
+
+/** Generated versions kept per scene and kind (so undo in the editor still finds them). */
+export const MAX_SCENE_VERSIONS = 3;
+
+/**
+ * A new version of one scene's picture (ADR 047): a fresh image (optionally from an edited
+ * prompt) or a fresh stock clip. Earlier versions are kept, so the editor can switch back or
+ * undo; beyond MAX_SCENE_VERSIONS the oldest ones the saved timeline doesn't use are deleted.
+ */
+export async function regenerateSceneVersion(
+  ctx: StepContext,
+  env: Env,
+  scene: SceneRef & { description: string; duration_seconds: number },
+  what: "image" | "footage",
+  prompt: string | null,
+  aspect: AspectRatio,
+  keep: ReadonlySet<string>,
+): Promise<{ outcome: MediaOutcome; asset_id: string | null }> {
+  const media = env.MEDIA;
+  if (!media)
+    return {
+      outcome: { status: "fallback", reason: "Media storage (R2) isn't configured." },
+      asset_id: null,
+    };
+  const capability = what === "image" ? "image" : "video";
+  const text = (prompt ?? "").trim();
+  const request: MediaRequest =
+    capability === "image"
+      ? {
+          capability,
+          prompt: text || scene.visual_prompt || scene.description,
+          aspect_ratio: aspect,
+        }
+      : {
+          capability,
+          prompt: stockQuery(text || scene.description || scene.visual_prompt || ""),
+          aspect_ratio: aspect,
+          duration_seconds: scene.duration_seconds,
+          // "Another clip": skip the ones this scene already has.
+          avoid: (await listAssets(ctx.db, ctx.userId, ctx.projectId))
+            .filter((a) => a.scene_id === scene.id && a.asset_type === "video")
+            .map((a) => (typeof a.metadata.model === "string" ? a.metadata.model : ""))
+            .filter(Boolean),
+        };
+  const version = crypto.randomUUID().slice(0, 8);
+  const outcome = await runAgentJob<MediaOutcome>(
+    ctx,
+    AGENT[capability],
+    capability === "image" ? "regenerate_image" : "find_other_stock_video",
+    null,
+    async () => {
+      try {
+        const { result, provider, attempts } = await generateMedia(
+          ctx.db,
+          env,
+          { userId: ctx.userId, projectId: ctx.projectId },
+          request,
+        );
+        const storage_key = `${runPrefix(ctx)}scene-${scene.scene_number}-${capability}-v${version}.${result.extension}`;
+        await media.put(storage_key, result.bytes, {
+          httpMetadata: { contentType: result.mime_type },
+        });
+        const asset = await createAsset(ctx.db, ctx.userId, ctx.projectId, {
+          asset_type: ASSET_TYPE[capability],
+          storage_key,
+          mime_type: result.mime_type,
+          file_size: result.bytes.byteLength,
+          scene_id: scene.id,
+          source_provider: provider,
+          license: result.license ?? { source: "generated", provider, model: result.model },
+          metadata: {
+            model: result.model,
+            version: true,
+            ...(text ? { prompt: text.slice(0, 1000) } : {}),
+            ...(result.width ? { width: result.width, height: result.height } : {}),
+            ...(result.duration_seconds ? { duration_seconds: result.duration_seconds } : {}),
+            attempts,
+          },
+        });
+        return {
+          output: { status: "ok", asset_id: asset.id, provider },
+          meta: { agent: AGENT[capability], model: result.model, attempts: 1 },
+        };
+      } catch (err) {
+        if (err instanceof NoProviderError)
+          return {
+            output: { status: "fallback", reason: err.message },
+            meta: { agent: AGENT[capability], model: "none", attempts: 1 },
+          };
+        throw err;
+      }
+    },
+    { jobKey: `${AGENT[capability]}:${scene.scene_number}:version:${version}`, sceneId: scene.id },
+  );
+  if (outcome.status === "ok")
+    await pruneSceneVersions(
+      ctx,
+      media,
+      scene.id,
+      ASSET_TYPE[capability],
+      new Set([...keep, outcome.asset_id]),
+    );
+  return { outcome, asset_id: outcome.status === "ok" ? outcome.asset_id : null };
+}
+
+/** Deletes a scene's oldest versions of one kind beyond the limit, sparing those in `keep`. */
+export async function pruneSceneVersions(
+  ctx: StepContext,
+  media: R2Bucket,
+  sceneId: string,
+  type: "image" | "voiceover" | "video",
+  keep: ReadonlySet<string>,
+): Promise<string[]> {
+  const versions = (await listAssets(ctx.db, ctx.userId, ctx.projectId)).filter(
+    (a) => a.scene_id === sceneId && a.asset_type === type,
+  );
+  const removable = versions
+    .slice(0, Math.max(0, versions.length - MAX_SCENE_VERSIONS))
+    .filter((a) => !keep.has(a.id));
+  for (const old of removable) {
+    const { storage_key } = await deleteAsset(ctx.db, ctx.userId, old.id);
+    await media.delete(storage_key);
+  }
+  return removable.map((a) => a.id);
 }

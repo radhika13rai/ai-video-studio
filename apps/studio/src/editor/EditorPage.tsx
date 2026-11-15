@@ -3,9 +3,11 @@ import type { TimelineRevision } from "@avs/schemas";
 import { ASPECT_RATIOS } from "@avs/types";
 import { useCallback, useEffect, useState } from "react";
 import { ErrorBox } from "../components/Feedback";
-import { Link } from "../lib/router";
+import { Link, navigate } from "../lib/router";
 import {
+  exportProject,
   getProject,
+  regenerateScene,
   listAssets,
   listTimelineRevisions,
   restoreTimelineRevision,
@@ -14,6 +16,7 @@ import type { EditorCommand } from "./commands";
 import type { DraftStore } from "./drafts";
 import { Inspector } from "./Inspector";
 import { PreviewPlayer } from "./PreviewPlayer";
+import { SceneVersions } from "./SceneVersions";
 import { TimelineView, type InspectorTab } from "./TimelineView";
 import { useTimelineEditor, type SaveStatus } from "./useTimelineEditor";
 
@@ -38,6 +41,8 @@ export function EditorPage({ id, store }: { id: string; store?: DraftStore }) {
   const [tab, setTab] = useState<InspectorTab>("scene");
   const [zoom, setZoom] = useState(1);
   const [versions, setVersions] = useState<TimelineRevision[] | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   useEffect(() => {
     getProject(id).then(setProject, () => undefined);
@@ -70,6 +75,30 @@ export function EditorPage({ id, store }: { id: string; store?: DraftStore }) {
     },
     [t],
   );
+
+  /** Puts a scene version on the clip (an undoable edit). */
+  const applyVersion = (clipId: string, asset: Asset) =>
+    dispatch({
+      type: "updateClip",
+      clipId,
+      patch:
+        asset.asset_type === "video"
+          ? { video_asset_id: asset.id }
+          : { image_asset_id: asset.id, video_asset_id: null },
+    });
+
+  /** Saves, then starts a render-only run and goes to the project page to render. */
+  const exportVideo = async () => {
+    setExporting(true);
+    try {
+      await editor.saveNow();
+      await exportProject(id);
+      navigate(`/projects/${id}`);
+    } catch (e) {
+      setExportError(e instanceof Error ? e.message : "Couldn't start the export.");
+      setExporting(false);
+    }
+  };
 
   const select = useCallback(
     (clipId: string, next?: InspectorTab) => {
@@ -178,11 +207,30 @@ export function EditorPage({ id, store }: { id: string; store?: DraftStore }) {
           >
             Versions
           </button>
-          <Link href={`/projects/${id}`} className="btn small primary">
-            Render…
-          </Link>
+          {project?.status === "awaiting_render" ? (
+            <Link href={`/projects/${id}`} className="btn small primary">
+              Render…
+            </Link>
+          ) : (
+            <button
+              type="button"
+              className="btn small primary"
+              disabled={exporting || state.status === "conflict"}
+              onClick={() => void exportVideo()}
+            >
+              {exporting ? "Starting…" : "Export video"}
+            </button>
+          )}
         </div>
       </header>
+      {exportError && (
+        <div className="banner warn" role="alert">
+          <p>{exportError}</p>
+          <button type="button" className="btn small" onClick={() => setExportError(null)}>
+            OK
+          </button>
+        </div>
+      )}
 
       {state.recovery && (
         <div className="banner" role="alert">
@@ -289,6 +337,18 @@ export function EditorPage({ id, store }: { id: string; store?: DraftStore }) {
         dispatch={dispatch}
       />
       <Inspector
+        versions={
+          <SceneVersions
+            clip={clip}
+            assets={assets}
+            onRegenerate={async (what, prompt) => {
+              const { asset } = await regenerateScene(id, clip.scene_id, what, prompt);
+              setAssets((list) => [...list, asset]);
+              applyVersion(clip.id, asset);
+            }}
+            onUse={(asset) => applyVersion(clip.id, asset)}
+          />
+        }
         timeline={t}
         clip={clip}
         index={index}
