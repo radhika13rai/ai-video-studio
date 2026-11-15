@@ -9,6 +9,8 @@ import {
   outputSize,
   sceneAt,
   activeWords,
+  cameraMotion,
+  FPS,
   shotsFor,
   transitionAt,
   TRANSITION_FRAMES,
@@ -17,6 +19,7 @@ import {
   wrapText,
 } from "./timeline";
 import { fitSpeed } from "./voice";
+import { musicPlan } from "./audio";
 import { encodeWav } from "./wav";
 
 const manifest = (durations: number[]): RenderManifest => ({
@@ -195,5 +198,54 @@ describe("voice pacing", () => {
     expect(fitSpeed(4, 5)).toBe(1);
     expect(fitSpeed(5.5, 5)).toBeCloseTo(1.1);
     expect(fitSpeed(9, 5)).toBe(1.2);
+  });
+});
+
+describe("following the Creative Director's plan", () => {
+  it("turns planned camera moves into the matching motion", () => {
+    const push = cameraMotion("push_in", 1.15);
+    expect(push.zoomTo).toBeGreaterThan(push.zoomFrom);
+    const pull = cameraMotion("pull_out", 1.15);
+    expect(pull.zoomTo).toBeLessThan(pull.zoomFrom);
+    const left = cameraMotion("pan_left", 1.15);
+    expect(left.panX[1]).toBeLessThan(left.panX[0]);
+    const up = cameraMotion("tilt_up", 1.15);
+    expect(up.panY[1]).toBeLessThan(up.panY[0]);
+    const still = cameraMotion("static", 1.15);
+    expect(still.zoomFrom).toBe(still.zoomTo);
+    expect(still.drift).toBeLessThan(1);
+    expect(cameraMotion("handheld", 1).drift).toBeGreaterThan(1);
+    expect(Math.abs(cameraMotion("orbit", 1).camera[1])).toBeGreaterThan(1);
+  });
+
+  it("frames the first shot at the planned size and keeps the move on every shot", () => {
+    const wide = shotsFor(0, 240, FPS, { shot: "wide", camera: "push_in" });
+    const close = shotsFor(0, 240, FPS, { shot: "close", camera: "push_in" });
+    expect(close[0]!.zoomFrom).toBeGreaterThan(wide[0]!.zoomFrom);
+    for (const s of close) expect(s.zoomTo).toBeGreaterThan(s.zoomFrom);
+    expect(close.reduce((n, s) => n + s.frameCount, 0)).toBe(240);
+    // No plan: exactly the previous behaviour.
+    expect(shotsFor(2, 240, FPS, {})).toEqual(shotsFor(2, 240));
+  });
+
+  it("uses the planned transition, and a planned cut has no blend", () => {
+    const m = manifest([3, 3, 3]);
+    m.scenes[1]!.transition_in = "flash";
+    m.scenes[2]!.transition_in = "cut";
+    const { scenes } = buildTimeline(m);
+    expect(transitionAt(scenes, scenes[1]!.startFrame)?.kind).toBe("flash");
+    expect(transitionAt(scenes, scenes[2]!.startFrame)).toBeNull();
+    expect(transitionAt(scenes, scenes[2]!.startFrame - 2)).toBeNull();
+  });
+
+  it("picks chords, tempo and texture from the planned music mood", () => {
+    expect(musicPlan().tempo_bpm).toBe(92); // default: light
+    const upbeat = musicPlan("upbeat");
+    const ambient = musicPlan("ambient");
+    expect(upbeat.pulse).toBe(true);
+    expect(ambient.arpeggio).toBe(false);
+    expect(ambient.brightness).toBeLessThan(upbeat.brightness);
+    expect(musicPlan("driving", 200).tempo_bpm).toBe(140);
+    expect(musicPlan("warm", 30).tempo_bpm).toBe(60);
   });
 });

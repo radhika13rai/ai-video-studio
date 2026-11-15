@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.5.0 (2026-11-15)
+
+- The renderer follows the blueprint: planned shot size and camera move per scene, planned
+  transitions (including hard cuts), on-screen text labels, and music chords, texture and tempo
+  from the planned mood. Projects without a blueprint render as before.
+
 ## 1.4.0 (2026-11-15)
 
 - Creative Director: every new production gets a validated blueprint (story beats, style bible,

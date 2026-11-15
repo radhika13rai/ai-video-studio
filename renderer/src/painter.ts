@@ -46,10 +46,10 @@ const HIGHLIGHT = "#ffd84d";
 const shotCache = new Map<string, Shot[]>();
 
 function shotsOf(t: TimedScene): Shot[] {
-  const key = `${t.index}:${t.frameCount}`;
+  const key = `${t.index}:${t.frameCount}:${t.scene.shot ?? ""}:${t.scene.camera ?? ""}`;
   let s = shotCache.get(key);
   if (!s) {
-    s = shotsFor(t.index, t.frameCount);
+    s = shotsFor(t.index, t.frameCount, FPS, { shot: t.scene.shot, camera: t.scene.camera });
     shotCache.set(key, s);
   }
   return s;
@@ -77,6 +77,8 @@ export function paintFrame(ctx: Ctx2D, fc: FrameContext, frame: number): void {
   if (media.image) paintCaptions(ctx, w, h, media.words, seconds);
   else paintKineticText(ctx, w, h, media.words, seconds);
   if (frame < 2.4 * FPS) paintTitle(ctx, w, h, fc.title, frame / FPS);
+  else if (current.scene.on_screen_text)
+    paintLabel(ctx, w, h, current.scene.on_screen_text, seconds);
   paintProgress(ctx, w, h, frame / Math.max(1, fc.totalFrames - 1));
   if (fc.grain) paintGrain(ctx, w, h, fc.grain, frame);
 
@@ -117,8 +119,10 @@ function paintScene(ctx: Ctx2D, fc: FrameContext, timed: TimedScene, frame: numb
   if (index > 0 && sinceCut >= 0 && sinceCut < 6) zoom *= 1 + 0.05 * (1 - sinceCut / 6);
   // Gentle handheld drift so the frame is never perfectly still.
   const seed = timed.index * 7 + index;
-  const panX = lerp(shot.panX[0], shot.panX[1], m) + 0.03 * Math.sin(frame * 0.071 + seed);
-  const panY = lerp(shot.panY[0], shot.panY[1], m) + 0.025 * Math.sin(frame * 0.053 + seed * 2);
+  const drift = shot.drift ?? 1;
+  const panX = lerp(shot.panX[0], shot.panX[1], m) + 0.03 * drift * Math.sin(frame * 0.071 + seed);
+  const panY =
+    lerp(shot.panY[0], shot.panY[1], m) + 0.025 * drift * Math.sin(frame * 0.053 + seed * 2);
   const crop = coverRect(
     media.image.width,
     media.image.height,
@@ -375,6 +379,31 @@ function paintTitle(ctx: Ctx2D, w: number, h: number, title: string, seconds: nu
     ctx.fillText(p.word.text, 0, 0);
     ctx.restore();
   }
+}
+
+/** The scene's planned on-screen text: a short label near the top that pops in. */
+function paintLabel(ctx: Ctx2D, w: number, h: number, text: string, seconds: number) {
+  const size = Math.round(Math.min(w, h) * 0.05);
+  ctx.font = `800 ${size}px ${FONT}`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  const label = text.toUpperCase().slice(0, 40);
+  const tw = ctx.measureText(label).width;
+  const appear = clamp01(seconds / 0.3);
+  const scale = 0.85 + 0.15 * ease(appear);
+  ctx.save();
+  ctx.globalAlpha = appear;
+  ctx.translate(w / 2, h * 0.12);
+  ctx.scale(scale, scale);
+  ctx.fillStyle = "rgba(0,0,0,0.55)";
+  const padX = size * 0.6;
+  const padY = size * 0.4;
+  ctx.fillRect(-tw / 2 - padX, -size / 2 - padY, tw + 2 * padX, size + 2 * padY);
+  ctx.fillStyle = HIGHLIGHT;
+  ctx.fillRect(-tw / 2 - padX, size / 2 + padY - 4, tw + 2 * padX, 4);
+  ctx.fillStyle = "#ffffff";
+  ctx.fillText(label, 0, 0);
+  ctx.restore();
 }
 
 function paintProgress(ctx: Ctx2D, w: number, h: number, fraction: number) {

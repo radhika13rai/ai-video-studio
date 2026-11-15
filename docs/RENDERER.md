@@ -106,6 +106,22 @@ a copy of the ONNX `.wasm` into the build; it's unused (the runtime is pointed a
 - **Music:** generated in code (no licences): a C–G–Am–F pad, soft bass and plucked arpeggio at
   90 bpm, low-passed, ducked from 0.16 to 0.06 under narration. Optional in the render panel.
 
+## Following the Creative Director
+
+When the project has a blueprint, the manifest carries per-scene `shot`, `camera`,
+`transition_in` and `on_screen_text`, plus project `music: { mood, tempo_bpm }`. All optional:
+without them the renderer behaves exactly as before.
+
+- **Shot size** sets the first shot's framing (wide 1.02× … extreme close 1.55×); later shots punch
+  in closer on another part of the picture.
+- **Camera move** sets every shot's motion: push in / pull out (zoom), pan left/right, tilt up/down
+  (pan across the picture), orbit (stronger depth parallax), handheld (more drift), static (still,
+  minimal drift).
+- **Transition** replaces the rotating default; `cut` means a hard cut with no blend.
+- **On-screen text**: a short label near the top that pops in (not during the title intro).
+- **Music**: the mood picks the chords and texture (upbeat and driving pulse the bass; ambient
+  and warm drop the arpeggio and darken the filter); the tempo comes from the blueprint (60–140).
+
 ## Safety and limits
 
 - One render per project: the server hands out an attempt token with a 30-minute lease, and

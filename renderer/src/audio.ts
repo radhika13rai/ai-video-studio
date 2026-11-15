@@ -1,3 +1,4 @@
+import type { MusicMood } from "@avs/types";
 import { encodeWav } from "./wav";
 
 export const SAMPLE_RATE = 48000;
@@ -16,7 +17,7 @@ export interface NarrationClip {
 export async function mixNarration(
   clips: NarrationClip[],
   totalSeconds: number,
-  opts: { music?: boolean } = {},
+  opts: { music?: boolean | { mood: MusicMood; tempo_bpm: number } } = {},
 ): Promise<Uint8Array> {
   const length = Math.max(1, Math.ceil(totalSeconds * SAMPLE_RATE));
   const ctx = new OfflineAudioContext(2, length, SAMPLE_RATE);
@@ -36,26 +37,113 @@ export async function mixNarration(
     src.start(start, 0, dur);
     spoken.push([start, start + dur]);
   }
-  if (opts.music) addBackingTrack(ctx, totalSeconds, spoken);
+  if (opts.music)
+    addBackingTrack(
+      ctx,
+      totalSeconds,
+      spoken,
+      musicPlan(
+        opts.music === true ? undefined : opts.music.mood,
+        opts.music === true ? undefined : opts.music.tempo_bpm,
+      ),
+    );
   const rendered = await ctx.startRendering();
   return encodeWav([rendered.getChannelData(0), rendered.getChannelData(1)], SAMPLE_RATE);
 }
 
-// A calm four-chord loop (C – G – Am – F), one chord every 2 bars at 90 bpm.
-const CHORDS = [
-  [261.63, 329.63, 392.0],
-  [196.0, 246.94, 293.66],
-  [220.0, 261.63, 329.63],
-  [174.61, 220.0, 261.63],
-];
-const BEAT = 60 / 90;
+// Note frequencies (Hz) for the chords below.
+const N = {
+  F3: 174.61,
+  G3: 196.0,
+  A3: 220.0,
+  Bb3: 233.08,
+  C4: 261.63,
+  D4: 293.66,
+  E4: 329.63,
+  F4: 349.23,
+  G4: 392.0,
+  A4: 440.0,
+} as const;
+const C = [N.C4, N.E4, N.G4];
+const G = [N.G3, 246.94, N.D4];
+const Am = [N.A3, N.C4, N.E4];
+const F = [N.F3, N.A3, N.C4];
+const Dm = [N.D4, N.F4, N.A4];
+const Bb = [N.Bb3, N.D4, N.F4];
+
+export interface MusicPlan {
+  chords: number[][];
+  tempo_bpm: number;
+  /** Plucked eighth-note arpeggio on top. */
+  arpeggio: boolean;
+  /** Pulsing eighth-note bass instead of a held one. */
+  pulse: boolean;
+  /** Low-pass cut-off: darker (lower) for ambient moods. */
+  brightness: number;
+}
+
+/** Chords, tempo and texture for a mood (the default when the plan has no music direction). */
+export function musicPlan(mood?: MusicMood, tempo?: number): MusicPlan {
+  const plans: Record<MusicMood, Omit<MusicPlan, "tempo_bpm"> & { tempo_bpm: number }> = {
+    upbeat: {
+      chords: [C, G, Am, F],
+      tempo_bpm: 116,
+      arpeggio: true,
+      pulse: true,
+      brightness: 2600,
+    },
+    light: {
+      chords: [F, C, Dm, Bb],
+      tempo_bpm: 92,
+      arpeggio: true,
+      pulse: false,
+      brightness: 2000,
+    },
+    ambient: {
+      chords: [Am, F, C, G],
+      tempo_bpm: 76,
+      arpeggio: false,
+      pulse: false,
+      brightness: 1100,
+    },
+    playful: {
+      chords: [C, F, G, C],
+      tempo_bpm: 100,
+      arpeggio: true,
+      pulse: false,
+      brightness: 2400,
+    },
+    driving: {
+      chords: [Am, F, C, G],
+      tempo_bpm: 104,
+      arpeggio: true,
+      pulse: true,
+      brightness: 2000,
+    },
+    warm: {
+      chords: [F, Am, Bb, C],
+      tempo_bpm: 88,
+      arpeggio: false,
+      pulse: false,
+      brightness: 1500,
+    },
+  };
+  const p = plans[mood ?? "light"];
+  return { ...p, tempo_bpm: Math.min(140, Math.max(60, Math.round(tempo ?? p.tempo_bpm))) };
+}
 
 /** Generated backing music: a warm pad, a soft bass and a light plucked pattern. */
-function addBackingTrack(ctx: OfflineAudioContext, total: number, spoken: [number, number][]) {
+function addBackingTrack(
+  ctx: OfflineAudioContext,
+  total: number,
+  spoken: [number, number][],
+  plan: MusicPlan,
+) {
+  const BEAT = 60 / plan.tempo_bpm;
   const bus = ctx.createGain();
   const filter = ctx.createBiquadFilter();
   filter.type = "lowpass";
-  filter.frequency.value = 1800;
+  filter.frequency.value = plan.brightness;
   bus.connect(filter).connect(ctx.destination);
   // Ducking: music at 0.16 normally, 0.06 under narration, with short ramps.
   const LOUD = 0.16;
@@ -70,12 +158,18 @@ function addBackingTrack(ctx: OfflineAudioContext, total: number, spoken: [numbe
 
   const chordSeconds = BEAT * 8;
   for (let t = 0, k = 0; t < total; t += chordSeconds, k++) {
-    const chord = CHORDS[k % CHORDS.length] as number[];
+    const chord = plan.chords[k % plan.chords.length] as number[];
     const end = Math.min(total, t + chordSeconds);
     for (const f of chord) tone(ctx, bus, f, "triangle", t, end, 0.05, 0.6, 0.8);
-    tone(ctx, bus, (chord[0] as number) / 2, "sine", t, end, 0.09, 0.3, 0.5);
+    const root = (chord[0] as number) / 2;
+    if (plan.pulse)
+      for (let n = 0; t + (n * BEAT) / 2 < end; n++) {
+        const at = t + (n * BEAT) / 2;
+        tone(ctx, bus, root, "sine", at, Math.min(end, at + BEAT * 0.4), 0.08, 0.005, 0.15);
+      }
+    else tone(ctx, bus, root, "sine", t, end, 0.09, 0.3, 0.5);
     // Plucked arpeggio on eighth notes.
-    for (let n = 0; n < 16 && t + (n * BEAT) / 2 < end; n++) {
+    for (let n = 0; plan.arpeggio && n < 16 && t + (n * BEAT) / 2 < end; n++) {
       const at = t + (n * BEAT) / 2;
       const f = (chord[n % 3] as number) * (n % 4 === 3 ? 2 : 1);
       tone(ctx, bus, f, "sine", at, Math.min(end, at + 0.45), 0.035, 0.005, 0.35);

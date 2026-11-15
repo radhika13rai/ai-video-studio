@@ -7,6 +7,7 @@ import {
   VENDOR_FILES,
 } from "@avs/contracts";
 import { renderManifestSchema } from "@avs/schemas";
+import { CAMERA_MOVES } from "@avs/types";
 import { env, introspectWorkflow, SELF } from "cloudflare:test";
 import { afterEach, describe, expect, it } from "vitest";
 import { setTextModelOverride } from "./helpers";
@@ -157,6 +158,10 @@ describe("browser render API", () => {
         caption: "Line 1 is spoken here.",
       });
       expect(manifest.scenes[0]?.image_url).toMatch(/\/assets\/[0-9a-f-]+\/content$/);
+      // The Creative Director's direction travels with the manifest.
+      expect(manifest.scenes[0]?.transition_in).toBe("cut");
+      expect(CAMERA_MOVES).toContain(manifest.scenes[0]?.camera);
+      expect(manifest.music).toEqual({ mood: "driving", tempo_bpm: 104 }); // faceless template
       expect(manifest.scenes[2]?.image_url).toBeNull(); // text card
       expect(manifest.scenes[2]?.voice_url).toMatch(/content$/);
       // The manifest's media URLs work for the owner.
@@ -264,6 +269,26 @@ describe("browser render API", () => {
       expect(done2.status).toBe(202);
       await instance.waitForStatus("complete");
       expect((await requireProject(env.DB, user.id, projectId)).status).toBe("completed");
+    } finally {
+      await introspector.dispose();
+    }
+  }, 30_000);
+
+  it("sends no direction for projects planned before the Creative Director", async () => {
+    const { projectId, introspector } = await readyProject();
+    try {
+      await env.DB.prepare(
+        "UPDATE projects SET production_config = json_remove(production_config, '$.blueprint') WHERE id = ?",
+      )
+        .bind(projectId)
+        .run();
+      const start = await call(API_PATHS.projectRender(projectId), { method: "POST" });
+      const manifest = renderManifestSchema.parse(((await start.json()) as { data: unknown }).data);
+      expect(manifest.music).toBeUndefined();
+      for (const s of manifest.scenes) {
+        expect(s.camera).toBeUndefined();
+        expect(s.transition_in).toBeUndefined();
+      }
     } finally {
       await introspector.dispose();
     }
