@@ -438,3 +438,72 @@ describe("timeline API", () => {
     expect(await getTimeline(db(), userId, projectId)).toBeNull();
   });
 });
+
+describe("editor fields in the manifest", () => {
+  it("are emitted only when they differ from the defaults", () => {
+    const t = timelineFromProduction({ aspect_ratio: "9:16", scenes, assets, directions });
+    const c0 = t.clips[0]!;
+    const edited: Timeline = {
+      ...t,
+      clips: [
+        {
+          ...c0,
+          overlays: [
+            {
+              id: "o1",
+              text: "Sale!",
+              start_s: 0.5,
+              duration_s: 2,
+              preset: "title",
+              x: 0.5,
+              y: 0.3,
+              animation: "pop",
+            },
+          ],
+          sfx: [{ id: "s1", kind: "boom", at_s: 1, gain_db: -2 }],
+          voice: { ...c0.voice, voice_id: "am_michael", speed: 1.1, gain_db: 3 },
+          transition_in: { kind: "cut", duration_s: 1 },
+          focal: { x: 0.2, y: 0.5 },
+          trim_in_s: 1.5,
+        },
+        ...t.clips.slice(1),
+      ],
+      captions: { enabled: true, style: "karaoke", position: "top" },
+      music: { ...t.music, gain_db: -6 },
+    };
+    const c = compileTimeline(edited, media);
+    expect(c.scenes[0]).toMatchObject({
+      overlays: [
+        {
+          text: "Sale!",
+          start_s: 0.5,
+          duration_s: 2,
+          preset: "title",
+          x: 0.5,
+          y: 0.3,
+          animation: "pop",
+        },
+      ],
+      sfx: [{ kind: "boom", at_s: 1, gain_db: -2 }],
+      voice_id: "am_michael",
+      voice_speed: 1.1,
+      voice_gain_db: 3,
+      transition_seconds: 1,
+      focal: { x: 0.2, y: 0.5 },
+      trim_in_seconds: 1.5,
+    });
+    expect(c.scenes[1]).not.toHaveProperty("overlays");
+    expect(c.captions).toEqual({ enabled: true, style: "karaoke", position: "top" });
+    expect(c.audio).toEqual({
+      music: true,
+      music_gain_db: -6,
+      duck_under_voice: true,
+      transition_sfx: true,
+    });
+    // Unedited: none of them.
+    const plain = compileTimeline(t, media);
+    expect(plain.captions).toBeUndefined();
+    expect(plain.audio).toBeUndefined();
+    expect(Object.keys(plain.scenes[0]!)).not.toContain("focal");
+  });
+});

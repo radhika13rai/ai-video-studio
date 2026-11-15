@@ -129,6 +129,28 @@ a copy of the ONNX `.wasm` into the build; it's unused (the runtime is pointed a
   clip falls back to a text card, the whoosh peaks around −21 dB RMS at the whip and the hit at
   the flash.
 
+## Editor features (ADR 044)
+
+The manifest compiled from the timeline can carry, per scene and only when edited:
+
+- `overlays`: text with a preset (title, lower third with a bar, label, quote), a position
+  (x, y as shares of the frame, kept inside it), a time window relative to the scene, and an
+  entrance (fade, pop, slide up, typewriter); up to three lines.
+- `sfx`: placed effects (whoosh, hit, riser, pop, boom), synthesized at scene start + offset with
+  their own level. A riser ends on its cue.
+- `voice_id`, `voice_speed`, `voice_gain_db`: a scene's own Kokoro voice (unknown ids fall back
+  to the chosen voice), speaking speed (instead of fitting to the scene) and level.
+- `transition_seconds`: the scene's transition length, centred on the cut (default 14 frames).
+- `focal`: the point of the picture kept in frame when cropping.
+- `trim_in_seconds`: seconds of footage skipped at the start.
+
+And for the whole video: `captions` (on/off, bold, minimal or karaoke, bottom, middle or top;
+text cards always show their words) and `audio` (music on/off, music level, ducking, automatic
+transition effects). Absent fields mean the previous behaviour, so older manifests render the
+same. Verified in headless Chromium: karaoke captions at the top, a popping title and a sliding
+lower third, a reframed picture, a 1.5 s crossfade, and with music off only the placed boom,
+pop and riser in the audio (no automatic whoosh when transition effects are off).
+
 ## Following the Creative Director
 
 When the project has a blueprint, the manifest carries per-scene `shot`, `camera`,

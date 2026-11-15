@@ -276,6 +276,14 @@ export interface CompiledScene {
   on_screen_text?: string | null;
   video_url?: string | null;
   credit?: string | null;
+  overlays?: Omit<TextOverlay, "id">[];
+  sfx?: Omit<SfxCue, "id">[];
+  voice_id?: string;
+  voice_speed?: number;
+  voice_gain_db?: number;
+  transition_seconds?: number;
+  focal?: { x: number; y: number };
+  trim_in_seconds?: number;
 }
 
 export interface CompiledTimeline {
@@ -283,6 +291,13 @@ export interface CompiledTimeline {
   duration_seconds: number;
   scenes: CompiledScene[];
   music?: { mood: (typeof MUSIC_MOODS)[number]; tempo_bpm: number };
+  captions?: Timeline["captions"];
+  audio?: {
+    music: boolean;
+    music_gain_db: number;
+    duck_under_voice: boolean;
+    transition_sfx: boolean;
+  };
 }
 
 /**
@@ -316,11 +331,26 @@ export function compileTimeline(
         ? { on_screen_text: c.on_screen_text }
         : {}),
       ...(video ? { video_url: video.url, credit: video.credit ?? null } : {}),
+      // Editor fields, only when they differ from the defaults (so unedited plans don't change).
+      ...(c.overlays.length ? { overlays: c.overlays.map(({ id: _id, ...o }) => o) } : {}),
+      ...(c.sfx.length ? { sfx: c.sfx.map(({ id: _id, ...s }) => s) } : {}),
+      ...(c.voice.voice_id ? { voice_id: c.voice.voice_id } : {}),
+      ...(c.voice.speed !== null ? { voice_speed: c.voice.speed } : {}),
+      ...(c.voice.gain_db !== 0 ? { voice_gain_db: c.voice.gain_db } : {}),
+      ...(c.transition_in &&
+      Math.abs(c.transition_in.duration_s - DEFAULT_TRANSITION_SECONDS) > 0.001
+        ? { transition_seconds: c.transition_in.duration_s }
+        : {}),
+      ...(c.focal.x !== 0.5 || c.focal.y !== 0.5 ? { focal: c.focal } : {}),
+      ...(c.trim_in_s > 0 ? { trim_in_seconds: c.trim_in_s } : {}),
     };
     start += c.duration_s;
     return scene;
   });
   const m = timeline.music;
+  const cap = timeline.captions;
+  const defaultMix =
+    m.mode === "generated" && m.gain_db === 0 && m.duck_under_voice && timeline.auto_transition_sfx;
   return {
     aspect_ratio: timeline.aspect_ratio,
     duration_seconds: start,
@@ -328,6 +358,17 @@ export function compileTimeline(
     ...(m.mode === "generated" && m.mood && m.tempo_bpm
       ? { music: { mood: m.mood, tempo_bpm: m.tempo_bpm } }
       : {}),
+    ...(cap.enabled && cap.style === "bold" && cap.position === "bottom" ? {} : { captions: cap }),
+    ...(defaultMix
+      ? {}
+      : {
+          audio: {
+            music: m.mode === "generated",
+            music_gain_db: m.gain_db,
+            duck_under_voice: m.duck_under_voice,
+            transition_sfx: timeline.auto_transition_sfx,
+          },
+        }),
   };
 }
 

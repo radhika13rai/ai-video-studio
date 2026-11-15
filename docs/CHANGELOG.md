@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.10.0 (2026-11-15)
+
+- Renderer editor features (E2): text overlays with presets and entrance animations, caption
+  styles (bold, minimal, karaoke) and positions, captions on/off, per-scene voice, speed and
+  level, music on/off, level and ducking, placed sound effects (whoosh, hit, riser, pop, boom),
+  per-scene transition length, focal point and footage trim. Unedited projects render as
+  before.
+
 ## 1.9.0 (2026-11-15)
 
 - Editable timelines (editor step E1): every project has a typed timeline (clips in order, each

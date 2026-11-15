@@ -311,3 +311,14 @@ A new production run deletes the old timeline. **Why:** editing needs one durabl
 document; magnetic clips match phone editors and keep reordering trivial; compiling (rather
 than teaching the renderer about timelines) keeps the renderer, upload and quality pipeline
 unchanged, and a test proves unedited projects render byte-for-byte the same plan.
+
+## 044. Editor features as optional manifest fields (2026-11-15)
+
+The timeline compiles editor settings into optional manifest fields, emitted only when they
+differ from the defaults; the renderer treats an absent field as the previous behaviour. Text
+overlays are drawn by the same canvas painter (presets, not free styling, so they stay legible
+on phones), sound effects are synthesized in the offline mix like the transition effects, and
+per-scene voice settings feed the existing Kokoro worker. **Why:** one renderer and one manifest
+for old and new projects, no new files or licences, and the golden test of ADR 043 keeps proving
+that unedited projects don't change. The split of the renderer into reusable media, paint and
+mix stages is done with the live preview (E4), where a second caller first needs it.
