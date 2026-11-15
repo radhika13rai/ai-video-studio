@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.5.1 (2026-11-15)
+
+- Removed the SDXL-Lightning image model and the MeloTTS server voice: Cloudflare retires both on
+  2026-11-20. FLUX schnell makes every image; narration is voiced only by Kokoro in the browser.
+- The production run no longer makes server narration files, and "Retry media" is offered only
+  for missing images.
+- The renderer reports how many narrated scenes got a voice; the quality check uses that report,
+  so videos voiced in the browser no longer show "no narration" warnings, and a scene the voice
+  couldn't speak is listed as missing instead of silently dropped.
+
 ## 1.5.0 (2026-11-15)
 
 - The renderer follows the blueprint: planned shot size and camera move per scene, planned

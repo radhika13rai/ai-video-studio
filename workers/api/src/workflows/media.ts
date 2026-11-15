@@ -1,7 +1,7 @@
 import type { AspectRatio } from "@avs/types";
 import { createAsset, deleteAsset, listAssets, listScenes, updateSceneStatus } from "../db";
 import type { Env } from "../env";
-import { generateMedia, NoProviderError } from "../providers/registry";
+import { generateMedia, hasCodeProvider, NoProviderError } from "../providers/registry";
 import type { MediaCapability } from "../providers/types";
 import { runAgentJob, type StepContext } from "./steps";
 
@@ -38,6 +38,10 @@ export async function prepareMediaStage(ctx: StepContext, env: Env): Promise<Sce
   }));
 }
 
+/** Narration with no server voice provider is voiced by Kokoro in the browser at render time. */
+export const BROWSER_VOICE_REASON =
+  "Narration is voiced in the browser (Kokoro) when the video renders.";
+
 const AGENT: Record<MediaCapability, string> = { image: "visual-artist", voice: "voice-director" };
 
 /**
@@ -56,6 +60,8 @@ export async function produceSceneMedia(
     return { status: "skipped", reason: "Scene is a text card by design." };
   if (capability === "voice" && !scene.voiceover?.trim())
     return { status: "skipped", reason: "Scene has no narration." };
+  if (capability === "voice" && !hasCodeProvider(env, "voice"))
+    return { status: "skipped", reason: BROWSER_VOICE_REASON };
 
   const keyStem = `${runPrefix(ctx)}scene-${scene.scene_number}-${capability}.`;
   const existing = (await listAssets(ctx.db, ctx.userId, ctx.projectId)).find((a) =>
@@ -176,6 +182,10 @@ export async function regenerateSceneMedia(
       out.voice = { status: "skipped", reason: "Scene has no narration." };
       continue;
     }
+    if (capability === "voice" && !hasCodeProvider(env, "voice")) {
+      out.voice = { status: "skipped", reason: BROWSER_VOICE_REASON };
+      continue;
+    }
     if (!env.MEDIA) {
       out[capability] = { status: "fallback", reason: "Media storage (R2) isn't configured." };
       continue;
@@ -248,7 +258,9 @@ export async function refreshFallbacks(
   ctx: StepContext,
   visualStyle: "image" | "video" | "animation",
   narration: boolean,
+  env: Env,
 ): Promise<string[]> {
+  const browserVoice = !hasCodeProvider(env, "voice");
   const scenes = await listScenes(ctx.db, ctx.userId, ctx.projectId);
   const assets = await listAssets(ctx.db, ctx.userId, ctx.projectId);
   const outcomes = scenes.map((s) => {
@@ -261,9 +273,11 @@ export async function refreshFallbacks(
           : { status: "fallback", reason: "no image was generated" };
     const voice: MediaOutcome = !s.voiceover?.trim()
       ? { status: "skipped", reason: "no narration" }
-      : has("voiceover")
-        ? { status: "ok", asset_id: "", provider: "" }
-        : { status: "fallback", reason: "no narration was generated" };
+      : browserVoice
+        ? { status: "skipped", reason: BROWSER_VOICE_REASON }
+        : has("voiceover")
+          ? { status: "ok", asset_id: "", provider: "" }
+          : { status: "fallback", reason: "no narration was generated" };
     return { scene: s.scene_number, image, voice };
   });
   return summarizeFallbacks(visualStyle, narration, outcomes);

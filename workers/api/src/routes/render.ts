@@ -226,6 +226,7 @@ export function registerRenderRoutes(router: Router<Ctx>): void {
       requireAttempt(now, request); // throws the stale-attempt error
     }
     const durationHeader = Number(request.headers.get("x-video-duration") ?? "");
+    const narration = narrationReport(request.headers);
     const asset = await createAsset(db, user.id, projectId, {
       asset_type: "render",
       storage_key,
@@ -241,6 +242,7 @@ export function registerRenderRoutes(router: Router<Ctx>): void {
           ? { reported_duration_seconds: durationHeader }
           : {}),
         encoder: (request.headers.get("x-video-encoder") ?? "").slice(0, 20),
+        ...(narration ? { narration } : {}),
       },
     });
     // Only now that the new video is safe, remove the previous one(s).
@@ -343,4 +345,19 @@ export async function serveVendor(env: Env, pathname: string): Promise<Response 
       "x-content-type-options": "nosniff",
     },
   });
+}
+
+/**
+ * What voiced the video, as the browser renderer reported it ("kokoro" + "3/4"). Ignored unless
+ * both headers are well-formed; the quality check then falls back to the stored voice assets.
+ */
+export function narrationReport(
+  headers: Headers,
+): { kind: "kokoro" | "provider" | "none"; voiced: number; total: number } | null {
+  const kind = headers.get("x-video-narration");
+  const m = /^(\d{1,3})\/(\d{1,3})$/.exec(headers.get("x-video-narrated-scenes") ?? "");
+  if ((kind !== "kokoro" && kind !== "provider" && kind !== "none") || !m) return null;
+  const voiced = Number(m[1]);
+  const total = Number(m[2]);
+  return voiced <= total ? { kind, voiced, total } : null;
 }

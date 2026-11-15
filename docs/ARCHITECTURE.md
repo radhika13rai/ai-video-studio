@@ -44,7 +44,7 @@ Browser (apps/studio)  ──/api/v1──▶  Worker (workers/api)  ──▶  
   completes. `POST /projects/:id/generate` and `/cancel` drive it; the project page shows live
   steps, errors and the storyboard. See `AGENTS.md`.
 
-- Media providers (`src/providers`): FLUX and SDXL images and MeloTTS narration on Workers AI, behind
+- Media providers (`src/providers`): FLUX schnell images on Workers AI (narration is voiced in the browser), behind
   a registry with priorities, daily caps, health and fallback. Each scene's media is stored in R2
   and served to its owner. See `PROVIDERS.md`.
 

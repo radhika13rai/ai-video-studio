@@ -166,7 +166,11 @@ export async function uploadRender(
   renderRequestId: string,
   attemptToken: string,
   mp4: Uint8Array,
-  info: { durationSeconds: number; encoder: string },
+  info: {
+    durationSeconds: number;
+    encoder: string;
+    narration?: { kind: string; voiced: number; total: number };
+  },
 ): Promise<Asset> {
   const res = await fetch(`${BASE_URL}${API_PATHS.projectRenderUpload(id, renderRequestId)}`, {
     method: "POST",
@@ -175,6 +179,12 @@ export async function uploadRender(
       [RENDER_ATTEMPT_HEADER]: attemptToken,
       "x-video-duration": String(info.durationSeconds),
       "x-video-encoder": info.encoder,
+      ...(info.narration
+        ? {
+            "x-video-narration": info.narration.kind,
+            "x-video-narrated-scenes": `${info.narration.voiced}/${info.narration.total}`,
+          }
+        : {}),
     },
     body: new Blob([mp4 as BlobPart], { type: "video/mp4" }),
   }).catch(() => {

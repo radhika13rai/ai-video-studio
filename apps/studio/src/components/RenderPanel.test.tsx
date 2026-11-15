@@ -57,6 +57,9 @@ describe("RenderPanel", () => {
         height: 1280,
         frames: 300,
         missingMedia: [],
+        narration: "kokoro",
+        narratedScenes: 2,
+        narrationScenes: 3,
       };
     });
     const calls = stubApi(
@@ -77,6 +80,11 @@ describe("RenderPanel", () => {
     expect(upload?.url.searchParams.get("render_request_id")).toBe("rr-1");
     expect((upload?.init.headers as Record<string, string>)["content-type"]).toBe("video/mp4");
     expect((upload?.init.headers as Record<string, string>)["x-video-encoder"]).toBe("webcodecs");
+    // What voiced the video goes with the upload, for the quality check.
+    expect(upload?.init.headers).toMatchObject({
+      "x-video-narration": "kokoro",
+      "x-video-narrated-scenes": "2/3",
+    });
     const complete = calls.find((c) => c.url.pathname.endsWith("/render/complete"));
     expect(JSON.parse(String(complete?.init.body))).toEqual({
       render_request_id: "rr-1",

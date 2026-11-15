@@ -228,9 +228,11 @@ export function SceneList({
                   />
                 ) : null;
               })()}
+              {/* Narration is voiced in the browser at render time, so only images are retried. */}
               {onRetry &&
-                ((s.visual_type !== "text" && s.visual_prompt && !forScene(s.id, "image")) ||
-                  (s.voiceover?.trim() && !forScene(s.id, "voiceover"))) && (
+                s.visual_type !== "text" &&
+                s.visual_prompt &&
+                !forScene(s.id, "image") && (
                   <button
                     type="button"
                     className="btn small retry"

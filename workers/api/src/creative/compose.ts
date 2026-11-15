@@ -165,7 +165,8 @@ export function compose(input: {
     if (s.visual_type !== "text")
       assets.push({ kind: "image", capability: "image", required: true, fallback: "text_card" });
     if (s.voiceover)
-      assets.push({ kind: "voice", capability: "voice", required: true, fallback: "server_voice" });
+      // Voiced by Kokoro in the browser; captions carry the script if that fails.
+      assets.push({ kind: "voice", capability: "voice", required: true, fallback: "captions" });
     if (i === 0)
       assets.push({
         kind: "music",

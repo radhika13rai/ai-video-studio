@@ -53,7 +53,7 @@ export const assetRequirementSchema = z.object({
   capability: z.enum(PROVIDER_CAPABILITIES),
   required: z.boolean(),
   /** What the video uses when no provider can produce the asset. */
-  fallback: z.enum(["text_card", "server_voice", "silence", "generated_music", "none"]),
+  fallback: z.enum(["text_card", "server_voice", "captions", "silence", "generated_music", "none"]),
 });
 export type AssetRequirement = z.infer<typeof assetRequirementSchema>;
 

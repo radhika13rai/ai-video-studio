@@ -353,6 +353,7 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, ProductionParams
               assets: await listAssets(db, userId, projectId),
               narrationPlanned: plan.narration,
               renderPlanSeconds: typeof reported === "number" ? reported : null,
+              renderNarration: narrationFromMetadata(video.metadata.narration),
               video: this.env.MEDIA
                 ? {
                     read: r2Reader(this.env.MEDIA, video.storage_key),
@@ -427,4 +428,18 @@ function friendly(message: string): string {
   if (/waitForEvent|timed? ?out/i.test(message))
     return `The video wasn't rendered within ${RENDER_TIMEOUT}. Generate again to retry.`;
   return message.slice(0, 500);
+}
+
+/** The renderer's narration report stored on the render asset, if it is well-formed. */
+function narrationFromMetadata(
+  value: unknown,
+): { kind: string; voiced: number; total: number } | null {
+  const parsed = z
+    .object({
+      kind: z.enum(["kokoro", "provider", "none"]),
+      voiced: z.number().int().min(0),
+      total: z.number().int().min(0),
+    })
+    .safeParse(value);
+  return parsed.success ? parsed.data : null;
 }

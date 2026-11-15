@@ -107,6 +107,15 @@ export function RenderPanel({
           {
             durationSeconds: result.durationSeconds,
             encoder: result.encoder,
+            ...(result.narration
+              ? {
+                  narration: {
+                    kind: result.narration,
+                    voiced: result.narratedScenes,
+                    total: result.narrationScenes,
+                  },
+                }
+              : {}),
           },
         );
         setState({ kind: "running", stage: "finish", progress: 0.5 });

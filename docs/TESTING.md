@@ -18,22 +18,22 @@ Live checks against Workers AI and in a real browser are recorded in `PROVIDERS.
 
 ## Blueprint acceptance tests
 
-| Test                         | Expected                    | Status                             | Where                                               |
-| ---------------------------- | --------------------------- | ---------------------------------- | --------------------------------------------------- |
-| Create project               | Saved in D1                 | ✅ automated                       | `api.test.ts`                                       |
-| Submit prompt                | Workflow starts             | ✅ automated                       | `workflow.test.ts`                                  |
-| Generate script              | Structured script saved     | ✅ automated, ✅ live (Workers AI) | `agents.test.ts`, `workflow.test.ts`                |
-| Create storyboard            | Scenes saved in D1          | ✅ automated, ✅ live              | `workflow.test.ts`                                  |
-| Generate images              | Assets stored in R2         | ✅ automated, ✅ live (FLUX)       | `providers.test.ts`                                 |
-| Generate narration           | Audio stored in R2          | ✅ automated, ✅ live (MeloTTS)    | `providers.test.ts`                                 |
-| Open renderer                | Correct manifest loads      | ✅ automated, ✅ browser           | `render.test.ts`                                    |
-| Export video                 | Valid MP4                   | ✅ browser + ffprobe; QC parses it | `RENDERER.md`, `quality.test.ts`                    |
-| Upload video                 | Final file in R2            | ✅ automated, ✅ browser           | `render.test.ts`                                    |
-| Run QC                       | Quality report generated    | ✅ automated                       | `quality.test.ts`, `workflow.test.ts`               |
-| Exhaust provider quota       | Graceful fallback           | ✅ automated                       | `providers.test.ts`, `workflow.test.ts`             |
-| Retry failed scene           | Only that scene regenerates | ✅ automated                       | `quality.test.ts`                                   |
-| Unauthorized project access  | 403 or 404                  | ✅ automated (404)                 | `api.test.ts`, `render.test.ts`                     |
-| Duplicate generation request | No duplicate workflow       | ✅ automated                       | `workflow.test.ts`, `api.test.ts` (Idempotency-Key) |
+| Test                         | Expected                    | Status                                                   | Where                                               |
+| ---------------------------- | --------------------------- | -------------------------------------------------------- | --------------------------------------------------- |
+| Create project               | Saved in D1                 | ✅ automated                                             | `api.test.ts`                                       |
+| Submit prompt                | Workflow starts             | ✅ automated                                             | `workflow.test.ts`                                  |
+| Generate script              | Structured script saved     | ✅ automated, ✅ live (Workers AI)                       | `agents.test.ts`, `workflow.test.ts`                |
+| Create storyboard            | Scenes saved in D1          | ✅ automated, ✅ live                                    | `workflow.test.ts`                                  |
+| Generate images              | Assets stored in R2         | ✅ automated, ✅ live (FLUX)                             | `providers.test.ts`                                 |
+| Generate narration           | Voiced in the browser       | ✅ automated (step skipped; QC uses the render's report) | `providers.test.ts`                                 |
+| Open renderer                | Correct manifest loads      | ✅ automated, ✅ browser                                 | `render.test.ts`                                    |
+| Export video                 | Valid MP4                   | ✅ browser + ffprobe; QC parses it                       | `RENDERER.md`, `quality.test.ts`                    |
+| Upload video                 | Final file in R2            | ✅ automated, ✅ browser                                 | `render.test.ts`                                    |
+| Run QC                       | Quality report generated    | ✅ automated                                             | `quality.test.ts`, `workflow.test.ts`               |
+| Exhaust provider quota       | Graceful fallback           | ✅ automated                                             | `providers.test.ts`, `workflow.test.ts`             |
+| Retry failed scene           | Only that scene regenerates | ✅ automated                                             | `quality.test.ts`                                   |
+| Unauthorized project access  | 403 or 404                  | ✅ automated (404)                                       | `api.test.ts`, `render.test.ts`                     |
+| Duplicate generation request | No duplicate workflow       | ✅ automated                                             | `workflow.test.ts`, `api.test.ts` (Idempotency-Key) |
 
 **Not yet verified:** one uninterrupted prompt-to-MP4 run on the deployed Worker with live AI.
 Every stage has run live separately; the full chain needs the production deployment (see

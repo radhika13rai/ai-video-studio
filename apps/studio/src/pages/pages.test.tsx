@@ -554,7 +554,7 @@ describe("quality report and scene retry", () => {
       me,
       route("GET", API_PATHS.project(p.id), () => ok(p)),
       route("GET", /\/scenes$/, () =>
-        ok([scene(1), scene(2, { visual_type: "text", visual_prompt: null, voiceover: "" })]),
+        ok([scene(1), scene(2, { visual_type: "text", visual_prompt: null, voiceover: "Words." })]),
       ),
       route("GET", /\/assets$/, () => ok(images)),
       route("GET", /\/(jobs|run|quality)$/, (url) =>
@@ -585,7 +585,8 @@ describe("quality report and scene retry", () => {
     goTo(`/projects/${p.id}`);
     render(<App />);
     const buttons = await screen.findAllByRole("button", { name: "Retry media" });
-    expect(buttons).toHaveLength(1); // scene 2 is a text card with no narration
+    // Scene 2 is a text card; its narration is voiced in the browser, so nothing to retry.
+    expect(buttons).toHaveLength(1);
     await userEvent.click(buttons[0]!);
     await waitFor(() => expect(screen.queryByRole("button", { name: "Retry media" })).toBeNull());
     expect(

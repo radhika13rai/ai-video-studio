@@ -50,6 +50,11 @@ export async function runQualityChecks(input: {
    * the upload). Used only when it's plausible; the real length always comes from the MP4.
    */
   renderPlanSeconds?: number | null;
+  /**
+   * What voiced the video, as the renderer reported it with the upload. When present it decides
+   * the narration checks (narration is usually voiced in the browser, so no voice asset exists).
+   */
+  renderNarration?: { kind: string; voiced: number; total: number } | null;
 }): Promise<QualityResult> {
   const checks: QualityCheck[] = [];
   const recs: string[] = [];
@@ -128,8 +133,10 @@ export async function runQualityChecks(input: {
       );
     }
 
+    const reported = input.renderNarration ?? null;
     const expectsAudio =
-      input.narrationPlanned && input.assets.some((a) => a.asset_type === "voiceover");
+      input.narrationPlanned &&
+      (reported ? reported.voiced > 0 : input.assets.some((a) => a.asset_type === "voiceover"));
     if (audio) {
       const aacOk = audio.codec === "mp4a";
       add({
@@ -152,7 +159,7 @@ export async function runQualityChecks(input: {
         },
         expectsAudio
           ? "Render the video again; the narration didn't make it into the file."
-          : "Add a voice provider to get narration.",
+          : "Render again in a browser that can run the Kokoro voice to get narration.",
       );
 
     const planned = input.project.duration_seconds;
@@ -245,19 +252,35 @@ export async function runQualityChecks(input: {
   );
   if (input.narrationPlanned) {
     const spoken = input.scenes.filter((s) => (s.voiceover ?? "").trim());
-    const voiced = spoken.filter((s) =>
-      input.assets.some((a) => a.scene_id === s.id && a.asset_type === "voiceover"),
-    );
-    const missingVoice = spoken.filter((s) => !voiced.includes(s)).map((s) => s.scene_number);
-    add(
-      {
-        id: "narration",
-        label: "Narration",
-        status: missingVoice.length === 0 ? "pass" : "warn",
-        detail: `${voiced.length} of ${spoken.length} narrated scenes have audio.`,
-      },
-      `Scene${missingVoice.length > 1 ? "s" : ""} ${missingVoice.join(", ")} ${missingVoice.length > 1 ? "have" : "has"} no narration; use "Retry media", then render again.`,
-    );
+    const reported = input.renderNarration ?? null;
+    if (reported && spoken.length > 0) {
+      const missing = Math.max(0, reported.total - reported.voiced);
+      add(
+        {
+          id: "narration",
+          label: "Narration",
+          status: missing === 0 ? "pass" : "warn",
+          detail: `${reported.voiced} of ${reported.total} narrated scenes have audio${reported.kind === "kokoro" ? " (Kokoro voice)" : reported.kind === "provider" ? " (server voice)" : ""}.`,
+        },
+        reported.voiced === 0
+          ? "No narration made it into the video; render again (the Kokoro voice needs a browser with background-worker support)."
+          : "Some scenes have no narration; render again.",
+      );
+    } else {
+      const voiced = spoken.filter((s) =>
+        input.assets.some((a) => a.scene_id === s.id && a.asset_type === "voiceover"),
+      );
+      const missingVoice = spoken.filter((s) => !voiced.includes(s)).map((s) => s.scene_number);
+      add(
+        {
+          id: "narration",
+          label: "Narration",
+          status: missingVoice.length === 0 ? "pass" : "warn",
+          detail: `${voiced.length} of ${spoken.length} narrated scenes have audio.`,
+        },
+        `Scene${missingVoice.length > 1 ? "s" : ""} ${missingVoice.join(", ")} ${missingVoice.length > 1 ? "have" : "has"} no narration; use "Retry media", then render again.`,
+      );
+    }
   }
 
   const fails = checks.filter((c) => c.status === "fail").length;
