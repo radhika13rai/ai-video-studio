@@ -3,7 +3,16 @@ import { WorkflowEntrypoint } from "cloudflare:workers";
 import { NonRetryableError } from "cloudflare:workflows";
 import type { QualityStatus } from "@avs/types";
 import { z } from "zod";
-import { briefSchema, runDirector, runScriptwriter, runStoryboard, type Brief } from "../agents";
+import { DEFAULT_GRAPHICS_THEME } from "@avs/schemas";
+import {
+  briefSchema,
+  runDirector,
+  runGraphicsLayout,
+  runScriptwriter,
+  runStoryboard,
+  type Brief,
+} from "../agents";
+import { productionBlueprintSchema } from "../creative/blueprint";
 import { productionPlanSchema, type ProductionPlan } from "../agents/director";
 import {
   compose,
@@ -24,13 +33,16 @@ import {
   mergeProductionConfig,
   replaceScenes,
   requireProject,
+  setProjectGraphicsTheme,
   setProjectStatusIf,
+  setSceneGraphicsLayouts,
   updateWorkflowRun,
   getTimeline,
 } from "../db";
 import type { Env } from "../env";
 import {
   animateSceneImage,
+  GRAPHICS_SCENE_REASON,
   markSceneReady,
   prepareMediaStage,
   produceSceneMedia,
@@ -293,6 +305,54 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, ProductionParams
             }
           });
 
+        // Motion graphics (ADR 048): pick a layout preset per graphics scene and fill its text
+        // slots (model, validated; deterministic fallback per scene, so it never fails the run).
+        if (plan.visual_style === "motion_graphics")
+          await step.do("graphics-layout", retry, async () => {
+            await ensureActive("graphics-layout");
+            const project = await requireProject(db, userId, projectId);
+            const rows = (await listScenes(db, userId, projectId)).filter(
+              (s) => s.visual_type === "graphics",
+            );
+            if (rows.length === 0) return { model: 0, fallback: 0 };
+            const bp = productionBlueprintSchema.safeParse(project.production_config.blueprint);
+            const planned = (n: number) =>
+              bp.success ? bp.data.scenes.find((s) => s.scene_number === n) : undefined;
+            const beat = (n: number) =>
+              bp.success
+                ? (bp.data.narrative.beats.find((b) => b.id === planned(n)?.beat_id)?.name ?? "")
+                : "";
+            const model = textModelFor(this.env);
+            const result = await runAgentJob(
+              ctx,
+              "graphics-layout",
+              "layout_graphics",
+              model,
+              async () =>
+                runGraphicsLayout(model, {
+                  brief,
+                  scenes: rows.map((s) => ({
+                    scene_number: s.scene_number,
+                    beat: beat(s.scene_number).slice(0, 60),
+                    narration: (s.voiceover ?? "").slice(0, 2000),
+                    on_screen_text: planned(s.scene_number)?.on_screen_text?.slice(0, 80) ?? null,
+                    description: s.description.slice(0, 2000),
+                  })),
+                }),
+            );
+            await setSceneGraphicsLayouts(
+              db,
+              userId,
+              projectId,
+              result.layouts.map(({ scene_number, layout }) => ({ scene_number, layout })),
+            );
+            await setProjectGraphicsTheme(db, userId, projectId, DEFAULT_GRAPHICS_THEME);
+            return {
+              model: result.layouts.filter((l) => l.source === "model").length,
+              fallback: result.layouts.filter((l) => l.source === "fallback").length,
+            };
+          });
+
         const scenes = await step.do("generate-assets", async () => {
           await ensureActive("generate-assets");
           await setProjectStatusIf(db, userId, projectId, ["planning"], "generating");
@@ -330,11 +390,16 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, ProductionParams
               return { status: "fallback", reason: message.slice(0, 200) };
             }
           };
-          const video: MediaOutcome = useVideo
-            ? await media("video")
-            : { status: "skipped", reason: "Not a video-style project." };
-          const image: MediaOutcome =
-            video.status === "ok"
+          // Graphics scenes (ADR 048) are drawn by the renderer: no picture or footage at all.
+          const graphics = scene.visual_type === "graphics";
+          const video: MediaOutcome = graphics
+            ? { status: "skipped", reason: GRAPHICS_SCENE_REASON }
+            : useVideo
+              ? await media("video")
+              : { status: "skipped", reason: "Not a video-style project." };
+          const image: MediaOutcome = graphics
+            ? { status: "skipped", reason: GRAPHICS_SCENE_REASON }
+            : video.status === "ok"
               ? { status: "skipped", reason: "Scene uses stock footage." }
               : await media("image");
           const animated: MediaOutcome =

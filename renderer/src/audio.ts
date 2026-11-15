@@ -11,7 +11,8 @@ export interface NarrationClip {
   gainDb?: number;
 }
 
-export type SfxKind = "whoosh" | "hit" | "riser" | "pop" | "boom";
+export type SfxKind =
+  "whoosh" | "hit" | "riser" | "pop" | "boom" | "click" | "tick" | "confirm" | "impact";
 export interface SfxCueAt {
   at: number;
   kind: SfxKind;
@@ -347,10 +348,115 @@ function addBoom(ctx: OfflineAudioContext, at: number, level = 1): void {
   osc.stop(at + 1.05);
 }
 
+/** Deterministic white noise (renders repeat exactly). */
+function noiseBuffer(ctx: OfflineAudioContext, seconds: number, seed0: number): AudioBuffer {
+  const buf = ctx.createBuffer(1, Math.max(1, Math.ceil(seconds * ctx.sampleRate)), ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  let seed = seed0;
+  for (let i = 0; i < data.length; i++) {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    data[i] = (seed / 0x7fffffff) * 2 - 1;
+  }
+  return buf;
+}
+
+/** A crisp UI click: a very short band of high noise plus a tiny tone. Cards landing. */
+function addClick(ctx: OfflineAudioContext, at: number, level = 1): void {
+  const src = ctx.createBufferSource();
+  src.buffer = noiseBuffer(ctx, 0.04, 4242 + Math.round(at * 1000));
+  const band = ctx.createBiquadFilter();
+  band.type = "bandpass";
+  band.frequency.value = 3200;
+  band.Q.value = 1.4;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, at);
+  g.gain.exponentialRampToValueAtTime(0.9 * level, at + 0.002);
+  g.gain.exponentialRampToValueAtTime(0.0001, at + 0.035);
+  src.connect(band).connect(g).connect(ctx.destination);
+  src.start(at);
+  src.stop(at + 0.04);
+  const osc = ctx.createOscillator();
+  osc.type = "square";
+  osc.frequency.setValueAtTime(1800, at);
+  const og = ctx.createGain();
+  og.gain.setValueAtTime(0.0001, at);
+  og.gain.exponentialRampToValueAtTime(0.05 * level, at + 0.002);
+  og.gain.exponentialRampToValueAtTime(0.0001, at + 0.025);
+  osc.connect(og).connect(ctx.destination);
+  osc.start(at);
+  osc.stop(at + 0.03);
+}
+
+/** A tiny high tick: something small appearing, a counter moving. */
+function addTick(ctx: OfflineAudioContext, at: number, level = 1): void {
+  const osc = ctx.createOscillator();
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(2600, at);
+  osc.frequency.exponentialRampToValueAtTime(2000, at + 0.03);
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, at);
+  g.gain.exponentialRampToValueAtTime(0.16 * level, at + 0.002);
+  g.gain.exponentialRampToValueAtTime(0.0001, at + 0.04);
+  osc.connect(g).connect(ctx.destination);
+  osc.start(at);
+  osc.stop(at + 0.05);
+}
+
+/** A bright two-note rising chime: a check landing, a task done. */
+function addConfirm(ctx: OfflineAudioContext, at: number, level = 1): void {
+  for (const [k, f] of [
+    [0, 880],
+    [1, 1318.5],
+  ] as const) {
+    const t = at + k * 0.07;
+    const osc = ctx.createOscillator();
+    osc.type = "triangle";
+    osc.frequency.setValueAtTime(f, t);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.16 * level, t + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+    osc.connect(g).connect(ctx.destination);
+    osc.start(t);
+    osc.stop(t + 0.24);
+  }
+}
+
+/** A punchy thump with a noise transient: a headline slamming in. */
+function addImpact(ctx: OfflineAudioContext, at: number, level = 1): void {
+  const osc = ctx.createOscillator();
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(150, at);
+  osc.frequency.exponentialRampToValueAtTime(48, at + 0.22);
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, at);
+  g.gain.exponentialRampToValueAtTime(0.42 * level, at + 0.005);
+  g.gain.exponentialRampToValueAtTime(0.0001, at + 0.3);
+  osc.connect(g).connect(ctx.destination);
+  osc.start(at);
+  osc.stop(at + 0.32);
+  const src = ctx.createBufferSource();
+  src.buffer = noiseBuffer(ctx, 0.08, 777 + Math.round(at * 1000));
+  const low = ctx.createBiquadFilter();
+  low.type = "lowpass";
+  low.frequency.value = 2500;
+  const ng = ctx.createGain();
+  ng.gain.setValueAtTime(0.0001, at);
+  ng.gain.exponentialRampToValueAtTime(0.35 * level, at + 0.003);
+  ng.gain.exponentialRampToValueAtTime(0.0001, at + 0.07);
+  src.connect(low).connect(ng).connect(ctx.destination);
+  src.start(at);
+  src.stop(at + 0.08);
+}
+
 const SFX: Record<SfxKind, (ctx: OfflineAudioContext, at: number, level: number) => void> = {
   whoosh: addWhoosh,
   hit: addHit,
   riser: addRiser,
   pop: addPop,
   boom: addBoom,
+  click: addClick,
+  tick: addTick,
+  confirm: addConfirm,
+  impact: addImpact,
 };

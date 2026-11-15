@@ -5,21 +5,21 @@ Data access: `workers/api/src/db/` (the only code that writes SQL).
 
 ## Tables
 
-| Table                | Holds                                                         | Deleted with project     |
-| -------------------- | ------------------------------------------------------------- | ------------------------ |
-| `users`              | One row per verified identity (email, unique)                 | n/a                      |
-| `projects`           | The video request, its settings, status and config JSON       | n/a                      |
-| `scenes`             | The storyboard: one row per scene, unique per `scene_number`  | yes (cascade)            |
-| `jobs`               | Agent work items with status and retry policy                 | yes (cascade)            |
-| `assets`             | Metadata for media stored in R2 (`storage_key`), never bytes  | yes (cascade)            |
-| `providers`          | Routing registry: enabled, priority, health, quota, breaker   | n/a (global)             |
-| `timelines`          | The project's editable timeline (JSON) and its `revision`     | yes (cascade)            |
-| `timeline_revisions` | Up to 20 snapshots of the timeline (history, recovery)        | yes (cascade)            |
-| `provider_jobs`      | Long-running provider work (submit/poll), deadline, cost      | yes (cascade)            |
-| `workflow_runs`      | Durable workflow executions and their current step            | yes (cascade)            |
-| `usage_events`       | Provider usage: units, tier, estimated and actual cost, user  | no (`project_id` → NULL) |
-| `quality_reports`    | QC results: status, score, checks, recommendations            | yes (cascade)            |
-| `idempotency_keys`   | Stored POST responses for safe retries (24 h, migration 0002) | with the user            |
+| Table                | Holds                                                                              | Deleted with project     |
+| -------------------- | ---------------------------------------------------------------------------------- | ------------------------ |
+| `users`              | One row per verified identity (email, unique)                                      | n/a                      |
+| `projects`           | The video request, its settings, status and config JSON                            | n/a                      |
+| `scenes`             | The storyboard: one row per scene, unique per `scene_number`; graphics layout JSON | yes (cascade)            |
+| `jobs`               | Agent work items with status and retry policy                                      | yes (cascade)            |
+| `assets`             | Metadata for media stored in R2 (`storage_key`), never bytes                       | yes (cascade)            |
+| `providers`          | Routing registry: enabled, priority, health, quota, breaker                        | n/a (global)             |
+| `timelines`          | The project's editable timeline (JSON) and its `revision`                          | yes (cascade)            |
+| `timeline_revisions` | Up to 20 snapshots of the timeline (history, recovery)                             | yes (cascade)            |
+| `provider_jobs`      | Long-running provider work (submit/poll), deadline, cost                           | yes (cascade)            |
+| `workflow_runs`      | Durable workflow executions and their current step                                 | yes (cascade)            |
+| `usage_events`       | Provider usage: units, tier, estimated and actual cost, user                       | no (`project_id` → NULL) |
+| `quality_reports`    | QC results: status, score, checks, recommendations                                 | yes (cascade)            |
+| `idempotency_keys`   | Stored POST responses for safe retries (24 h, migration 0002)                      | with the user            |
 
 ## Rules
 
@@ -68,7 +68,13 @@ Never edit an applied migration; add the next numbered file. Migration 0003 (ADR
 `providers` and `usage_events` to allow the `image_to_video` and `sfx` capabilities (SQLite can't
 alter a CHECK), keeping every row and filling `usage_events.user_id` from the project, and added
 `provider_jobs`. Migration 0004 (ADR 043) added `timelines` and
-`timeline_revisions`. Tests apply all migrations to a fresh local D1
+`timeline_revisions`. Migration 0005 (ADR 048) rebuilt `scenes` so `visual_type` allows
+`graphics` and added `scenes.graphics_layout` (a layout preset and its text slots as JSON; the API
+refuses layouts over 8 KB and reads malformed JSON as "no layout") and `projects.graphics_theme`
+(palette, anchor object, mascot). D1 keeps foreign keys on, and dropping the old `scenes` table
+fires `ON DELETE SET NULL` on `assets.scene_id` and `jobs.scene_id`, so the migration saves those
+links in a scratch table and restores them after the rename (tested in `migration-0005.test.ts`).
+Tests apply all migrations to a fresh local D1
 before each test file.
 
 ## Free-tier limits

@@ -152,7 +152,8 @@ export function registerProductionRoutes(router: Router<Ctx>): void {
       env,
       scene,
       project.aspect_ratio as AspectRatio,
-      ["image", "voice"],
+      // Graphics scenes have no picture to regenerate (ADR 048).
+      scene.visual_type === "graphics" ? ["voice"] : ["image", "voice"],
     );
     const plan = productionPlanSchema.safeParse(project.production_config.plan);
     const fallbacks = await refreshFallbacks(
@@ -192,6 +193,12 @@ export function registerProductionRoutes(router: Router<Ctx>): void {
     );
     const scene = (await listScenes(db, user.id, projectId)).find((s) => s.id === p.sceneId);
     if (!scene) throw new ApiError(404, "NOT_FOUND", "Scene not found.");
+    if (scene.visual_type === "graphics")
+      throw new ApiError(
+        409,
+        "INVALID_STATE",
+        "Graphics scenes are drawn by the renderer; change their layout in the editor instead.",
+      );
     const runId = await mediaRunId(db, user.id, project);
     if (!runId) throw new ApiError(409, "INVALID_STATE", "This project has no production run.");
     const { timeline } = await currentTimeline(db, user.id, project);

@@ -69,6 +69,7 @@ export function defaultTimeline(project: Project, scenes: Scene[], assets: Asset
         }))
       : [],
     music: bp.success ? { mood: bp.data.music.mood, tempo_bpm: bp.data.music.tempo_bpm } : null,
+    graphics_theme: project.graphics_theme,
   });
 }
 

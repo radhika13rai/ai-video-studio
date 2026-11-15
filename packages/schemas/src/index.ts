@@ -26,6 +26,7 @@ import {
   SFX_KINDS,
 } from "./timeline";
 import { z } from "zod";
+import { graphicsLayoutSchema, graphicsThemeSchema } from "./graphics";
 
 export const bindingCheckSchema = z.object({
   status: z.enum(["ok", "missing", "error"]),
@@ -91,6 +92,8 @@ export const projectSchema = z.object({
   target_platform: z.enum(TARGET_PLATFORMS),
   status: z.enum(PROJECT_STATUSES),
   production_config: z.record(z.string(), z.unknown()),
+  /** The look of graphics scenes (ADR 048); absent from older servers. */
+  graphics_theme: graphicsThemeSchema.nullable().optional(),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -142,6 +145,8 @@ export const sceneSchema = z.object({
   visual_type: z.enum(SCENE_VISUAL_TYPES),
   status: z.enum(SCENE_STATUSES),
   created_at: z.string(),
+  /** A graphics scene's layout (ADR 048). */
+  graphics_layout: graphicsLayoutSchema.nullable().optional(),
 });
 export type Scene = z.infer<typeof sceneSchema>;
 
@@ -304,6 +309,8 @@ export const renderManifestSchema = z.object({
         transition_seconds: z.number().min(0.1).max(2).optional(),
         focal: z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) }).optional(),
         trim_in_seconds: z.number().min(0).max(120).optional(),
+        /** A motion-graphics scene's layout (ADR 048). */
+        graphics: graphicsLayoutSchema.optional(),
       }),
     )
     .min(1)
@@ -326,6 +333,8 @@ export const renderManifestSchema = z.object({
       transition_sfx: z.boolean(),
     })
     .optional(),
+  /** The look of graphics scenes (absent: the default theme). */
+  graphics_theme: graphicsThemeSchema.optional(),
   /** Background music direction from the blueprint (absent: the default track). */
   music: z
     .object({ mood: z.enum(MUSIC_MOODS), tempo_bpm: z.number().int().min(60).max(140) })
@@ -362,3 +371,4 @@ export const qualityReportSchema = z.object({
 });
 export type QualityReport = z.infer<typeof qualityReportSchema>;
 export * from "./timeline";
+export * from "./graphics";

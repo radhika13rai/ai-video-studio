@@ -109,6 +109,7 @@ export function registerRenderRoutes(router: Router<Ctx>): void {
       ...(compiled.music ? { music: compiled.music } : {}),
       ...(compiled.captions ? { captions: compiled.captions } : {}),
       ...(compiled.audio ? { audio: compiled.audio } : {}),
+      ...(compiled.graphics_theme ? { graphics_theme: compiled.graphics_theme } : {}),
     };
     return jsonOk(manifest);
   });

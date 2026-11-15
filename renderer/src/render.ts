@@ -6,7 +6,15 @@ import { JpegFramesSink, pickWebCodecsConfig, WebCodecsSink, type FrameSink } fr
 import { assembleMp4, loadFFmpeg } from "./ffmpeg";
 import { makeGrain, paintFrame, type FrameContext, type SceneMedia } from "./painter";
 import { ParallaxRenderer } from "./parallax";
-import { buildTimeline, FPS, outputSize, TRANSITION_FRAMES, type Quality } from "./timeline";
+import { graphicsSfxCues, loadDisplayFont } from "./graphics";
+import {
+  buildTimeline,
+  FPS,
+  outputSize,
+  TRANSITION_FRAMES,
+  type Quality,
+  type TimedScene,
+} from "./timeline";
 import { startModelWorker, type ModelWorker } from "./ml";
 import { BACKUP_VOICE, DEFAULT_VOICE, fitSpeed, type Speech } from "./voice";
 import { clipTime, loadClip, sfxCues, type VideoClip } from "./video";
@@ -50,6 +58,8 @@ export interface RenderOptions {
   depth?: boolean;
   /** Override the on-device model time limits in milliseconds (tests). */
   limits?: Partial<typeof LIMITS>;
+  /** Origin the /vendor/ files (display font) are served from (default: this page's). */
+  vendorBase?: string;
 }
 
 export interface RenderResult {
@@ -223,6 +233,10 @@ export async function renderVideo(
     };
   });
 
+  // Graphics scenes need the display font before their first frame (ADR 048).
+  if (scenes.some((s) => s.visual_type === "graphics") && !(await loadDisplayFont(opts.vendorBase)))
+    notes.push("The headline font didn't load; graphics headlines used bold Inter.");
+
   // 3. Paint every frame and encode it.
   const canvas: HTMLCanvasElement | OffscreenCanvas =
     typeof OffscreenCanvas !== "undefined"
@@ -241,6 +255,7 @@ export async function renderVideo(
     parallax,
     grain: makeGrain(ctx),
     ...(manifest.captions ? { captions: manifest.captions } : {}),
+    ...(manifest.graphics_theme ? { graphicsTheme: manifest.graphics_theme } : {}),
   };
   const config = opts.forceFfmpegEncode ? null : await pickWebCodecsConfig(width, height, FPS);
   const sink: FrameSink = config ? new WebCodecsSink(config, FPS) : new JpegFramesSink();
@@ -523,18 +538,19 @@ async function syncFootage(
 }
 
 /** Transition effects (when on) plus every scene's placed sound effects, in seconds. */
-export function mixCues(
-  timeline: { startFrame: number; scene: RenderManifest["scenes"][number] }[],
-  transitions: boolean,
-): SfxCueAt[] {
+export function mixCues(timeline: TimedScene[], transitions: boolean): SfxCueAt[] {
   const cues: SfxCueAt[] = transitions
     ? sfxCues(
-        timeline.slice(1).map((t) => ({
-          seconds: t.startFrame / FPS,
-          transition: t.scene.transition_in,
-        })),
+        timeline.slice(1).flatMap((t, i) =>
+          // Boundaries touching a graphics scene only crossfade (no whoosh or hit).
+          t.scene.visual_type === "graphics" || timeline[i]?.scene.visual_type === "graphics"
+            ? []
+            : [{ seconds: t.startFrame / FPS, transition: t.scene.transition_in }],
+        ),
       )
     : [];
+  // Graphics scenes: a sound on every element's entrance, from the same cues the painter uses.
+  cues.push(...graphicsSfxCues(timeline));
   for (const t of timeline)
     for (const s of t.scene.sfx ?? [])
       cues.push({ at: t.startFrame / FPS + s.at_s, kind: s.kind, gainDb: s.gain_db });

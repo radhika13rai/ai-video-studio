@@ -1,4 +1,9 @@
-import { createProjectRequestSchema, type CreateProjectRequest } from "@avs/schemas";
+import {
+  createProjectRequestSchema,
+  graphicsThemeSchema,
+  type CreateProjectRequest,
+  type GraphicsTheme,
+} from "@avs/schemas";
 import { PROJECT_STATUSES, type ProjectStatus } from "@avs/types";
 import { z } from "zod";
 import { invalidData, notFound } from "./errors";
@@ -16,21 +21,56 @@ interface ProjectRow {
   target_platform: string;
   status: string;
   production_config: string;
+  /** JSON (migration 0005); absent in rows read before it. */
+  graphics_theme?: string | null;
   created_at: string;
   updated_at: string;
 }
 
-export interface Project extends Omit<ProjectRow, "production_config" | "status"> {
+export interface Project extends Omit<
+  ProjectRow,
+  "production_config" | "status" | "graphics_theme"
+> {
   status: ProjectStatus;
   production_config: JsonObject;
+  /** The look of the project's graphics scenes (ADR 048); null when it has none. */
+  graphics_theme: GraphicsTheme | null;
+}
+
+/** Parses stored theme JSON; anything malformed reads as no theme (the renderer's default). */
+function parseTheme(text: string | null | undefined): GraphicsTheme | null {
+  if (!text) return null;
+  try {
+    return graphicsThemeSchema.safeParse(JSON.parse(text)).data ?? null;
+  } catch {
+    return null;
+  }
 }
 
 function toProject(row: ProjectRow): Project {
+  const { graphics_theme, ...rest } = row;
   return {
-    ...row,
+    ...rest,
     status: z.enum(PROJECT_STATUSES).parse(row.status),
     production_config: fromJson(jsonObject, row.production_config, "production_config"),
+    graphics_theme: parseTheme(graphics_theme),
   };
+}
+
+/** Sets (or clears) the project's graphics theme. */
+export async function setProjectGraphicsTheme(
+  db: D1Database,
+  userId: string,
+  projectId: string,
+  theme: GraphicsTheme | null,
+): Promise<void> {
+  const parsed = theme === null ? null : graphicsThemeSchema.safeParse(theme);
+  if (parsed && !parsed.success) throw invalidData("graphics theme is not valid");
+  const res = await db
+    .prepare("UPDATE projects SET graphics_theme = ?, updated_at = ? WHERE id = ? AND user_id = ?")
+    .bind(parsed ? JSON.stringify(parsed.data) : null, nowIso(), projectId, userId)
+    .run();
+  if (res.meta.changes === 0) throw notFound("project");
 }
 
 export async function createProject(

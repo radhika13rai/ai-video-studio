@@ -14,14 +14,15 @@ import { briefSchema, parseInput, type AgentResult, type Brief } from "./types";
  */
 
 export type ConcreteVideoType = Exclude<VideoType, "auto">;
-export type VisualStyle = "image" | "video" | "animation";
+export type VisualStyle = "image" | "video" | "animation" | "motion_graphics";
 
 export const productionPlanSchema = z.object({
   video_type: z.enum(VIDEO_TYPES).exclude(["auto"]),
   classified_by: z.enum(["user", "rules"]),
   confidence: z.number().min(0).max(1),
   reason: z.string(),
-  visual_style: z.enum(["image", "video", "animation"]),
+  /** motion_graphics: every scene is a deterministic graphics layout, no AI media (ADR 048). */
+  visual_style: z.enum(["image", "video", "animation", "motion_graphics"]),
   narration: z.boolean(),
   presenter: z.boolean(),
   /** Capabilities the providers must cover for this video. */
@@ -147,6 +148,14 @@ const PIPELINES: Record<
   },
 };
 
+/** Briefs asking for a motion-graphics explainer get graphics scenes instead of AI pictures. */
+const MOTION_GRAPHICS =
+  /\bmotion[- ]?graphics?\b|\bmotion design\b|\banimated (?:software |product |saas )?explainer\b|\bkinetic typography\b|\bexplainer animation\b/;
+
+export function wantsMotionGraphics(brief: Pick<Brief, "title" | "prompt" | "style">): boolean {
+  return MOTION_GRAPHICS.test(`${brief.title} ${brief.prompt} ${brief.style ?? ""}`.toLowerCase());
+}
+
 /** Keyword hits per video type, highest first (shared with the Creative Director). */
 export function scoreTypes(text: string): { type: ConcreteVideoType; hits: number }[] {
   const lower = text.toLowerCase();
@@ -189,9 +198,14 @@ export function runDirector(input: unknown): AgentResult<ProductionPlan> {
           reason: "Chosen by the user.",
           classified_by: "user" as const,
         };
-  const pipe = PIPELINES[picked.type];
+  const base = PIPELINES[picked.type];
+  const pipe = wantsMotionGraphics(brief)
+    ? { ...base, visual_style: "motion_graphics" as const, tone: `${base.tone}; motion graphics` }
+    : base;
   const capabilities: ProviderCapability[] = ["text"];
-  capabilities.push(pipe.visual_style === "image" ? "image" : "video");
+  // Graphics scenes are drawn in the browser: no picture provider needed.
+  if (pipe.visual_style !== "motion_graphics")
+    capabilities.push(pipe.visual_style === "image" ? "image" : "video");
   if (pipe.narration) capabilities.push("voice");
   capabilities.push("music");
   const scene_count = Math.max(

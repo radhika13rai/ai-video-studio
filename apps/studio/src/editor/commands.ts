@@ -3,6 +3,7 @@ import {
   MIN_CLIP_SECONDS,
   timelineSchema,
   type Clip,
+  type GraphicsLayout,
   type SfxCue,
   type TextOverlay,
   type Timeline,
@@ -46,7 +47,8 @@ export type EditorCommand =
   | { type: "setCaptions"; patch: Partial<Timeline["captions"]> }
   | { type: "setMusic"; patch: Partial<Timeline["music"]> }
   | { type: "setAutoTransitionSfx"; on: boolean }
-  | { type: "setAspect"; aspect: Timeline["aspect_ratio"] };
+  | { type: "setAspect"; aspect: Timeline["aspect_ratio"] }
+  | { type: "setGraphics"; clipId: string; layout: GraphicsLayout };
 
 /** Rounds to 0.1 s without binary-fraction drift (3.4, not 3.4000000000000004). */
 const round = (n: number) => Math.round(n * 10) / 10;
@@ -149,6 +151,8 @@ export function applyCommand(t: Timeline, cmd: EditorCommand): Timeline {
       return { ...t, auto_transition_sfx: cmd.on };
     case "setAspect":
       return { ...t, aspect_ratio: cmd.aspect };
+    case "setGraphics":
+      return mapClip(t, cmd.clipId, (c) => ({ ...c, graphics: cmd.layout }));
   }
 }
 
@@ -170,6 +174,9 @@ export function coalesceKey(cmd: EditorCommand): string | null {
     case "setCaptions":
     case "setMusic":
       return `${cmd.type}:${Object.keys(cmd.patch).sort().join(",")}`;
+    case "setGraphics":
+      // Typing in one slot merges into one undo step; a preset change starts a new one.
+      return `gfx:${cmd.clipId}:${cmd.layout.preset}`;
     default:
       return null;
   }
