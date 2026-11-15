@@ -3,6 +3,7 @@ import type { PreviewController, PreviewState } from "@avs/renderer";
 import { compileTimeline, type RenderManifest, type Timeline } from "@avs/schemas";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { assetUrl } from "../services/api";
+import { loadRenderer } from "../services/renderer";
 
 /**
  * Live preview of the timeline being edited (ADR 046): compiles the timeline into a manifest in
@@ -81,7 +82,7 @@ export function PreviewPlayer({
     let created: PreviewController | null = null;
     (async () => {
       try {
-        const { createPreview } = await import("@avs/renderer");
+        const { createPreview } = await loadRenderer();
         if (!live || !canvasRef.current) return;
         created = await createPreview(canvasRef.current, latest.current, {}, (s) => {
           if (live) setState(s);
