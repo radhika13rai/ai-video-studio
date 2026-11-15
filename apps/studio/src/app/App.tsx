@@ -1,4 +1,5 @@
 import { Layout } from "../components/Layout";
+import { EditorPage } from "../editor/EditorPage";
 import { Link, matchRoute, usePath } from "../lib/router";
 import { NewProjectPage } from "../pages/NewProjectPage";
 import { ProjectPage } from "../pages/ProjectPage";
@@ -13,6 +14,7 @@ export function App() {
       {route.name === "projects" && <ProjectsPage />}
       {route.name === "new" && <NewProjectPage />}
       {route.name === "project" && <ProjectPage key={route.id} id={route.id} />}
+      {route.name === "edit" && <EditorPage key={route.id} id={route.id} />}
       {route.name === "status" && <StatusPage />}
       {route.name === "not-found" && (
         <section className="narrow">

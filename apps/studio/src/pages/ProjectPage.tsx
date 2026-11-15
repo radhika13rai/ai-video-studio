@@ -64,6 +64,9 @@ type State =
   | { kind: "error"; message: string }
   | { kind: "ready"; project: Project };
 
+/** Statuses in which the timeline editor is open (production has made the media). */
+const EDITABLE: ProjectStatus[] = ["awaiting_render", "completed", "failed", "cancelled"];
+
 export function ProjectPage({ id }: { id: string }) {
   const [state, setState] = useState<State>({ kind: "loading" });
   const [progress, setProgress] = useState<Progress>({
@@ -349,6 +352,11 @@ export function ProjectPage({ id }: { id: string }) {
                 loadProgress();
               }}
             />
+          )}
+          {EDITABLE.includes(p.status) && progress.scenes.length > 0 && !rendering && (
+            <Link href={`/projects/${p.id}/edit`} className="btn wide primary">
+              Edit video
+            </Link>
           )}
           {STARTABLE.includes(p.status) && !rendering && (
             <button

@@ -39,7 +39,12 @@ export function Layout({ route, children }: { route: Route; children: ReactNode 
             <span className="brand-name">AI Video Studio</span>
           </Link>
           <nav className="nav" aria-label="Main">
-            <NavLink href="/" active={route.name === "projects" || route.name === "project"}>
+            <NavLink
+              href="/"
+              active={
+                route.name === "projects" || route.name === "project" || route.name === "edit"
+              }
+            >
               Projects
             </NavLink>
             <NavLink href="/status" active={route.name === "status"}>

@@ -322,3 +322,18 @@ per-scene voice settings feed the existing Kokoro worker. **Why:** one renderer 
 for old and new projects, no new files or licences, and the golden test of ADR 043 keeps proving
 that unedited projects don't change. The split of the renderer into reusable media, paint and
 mix stages is done with the live preview (E4), where a second caller first needs it.
+
+## 045. The editor: typed commands, snapshot history, two-level autosave (2026-11-15)
+
+Every edit is an `EditorCommand` applied by a pure reducer and validated against the timeline
+schema before it is accepted (refused edits show the schema's reason). History keeps whole
+timeline snapshots (a timeline is small; structural sharing keeps unchanged clips shared), up
+to 100, merging commands with the same coalesce key within one second. Autosave writes a draft
+to localStorage after 0.3 s (enough for ≤ 256 KB, synchronous and available everywhere; the
+voice cache in E4 uses IndexedDB because it stores audio) and saves to the server 2 s after the
+last edit with the base revision; 409 → keep mine / load theirs, network failure → retry every
+10 s with the draft kept, 4xx → the reason is shown. On load, a draft that differs from the
+server is offered for restore (flagged when it started from an older revision). Drag and drop
+uses pointer events (mouse and pen drag after 8 px; touch needs a 300 ms long press so the
+timeline still scrolls) with pure geometry helpers, and every drag has a button or keyboard
+equivalent. No editor or drag-and-drop library was added.
