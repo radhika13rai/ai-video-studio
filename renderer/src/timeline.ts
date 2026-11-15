@@ -271,7 +271,8 @@ export function transitionAt(timeline: TimedScene[], frame: number): Transition 
     const from = timeline[i - 1] as TimedScene;
     const planned: SceneTransition | undefined = to.scene.transition_in;
     if (planned === "cut") continue; // a planned hard cut: no blend
-    const span = Math.min(half, from.frameCount / 3, to.frameCount / 3);
+    const want = to.scene.transition_seconds ? (to.scene.transition_seconds * FPS) / 2 : half;
+    const span = Math.max(1, Math.min(want, from.frameCount / 3, to.frameCount / 3));
     if (frame >= to.startFrame - span && frame < to.startFrame + span) {
       return {
         from,

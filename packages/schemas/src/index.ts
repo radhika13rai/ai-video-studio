@@ -18,6 +18,13 @@ import {
   VIDEO_TYPES,
   WORKFLOW_RUN_STATUSES,
 } from "@avs/types";
+import {
+  CAPTION_POSITIONS,
+  CAPTION_STYLES,
+  OVERLAY_ANIMATIONS,
+  OVERLAY_PRESETS,
+  SFX_KINDS,
+} from "./timeline";
 import { z } from "zod";
 
 export const bindingCheckSchema = z.object({
@@ -241,6 +248,21 @@ export const providerCostsSchema = z.object({
 });
 export type ProviderCosts = z.infer<typeof providerCostsSchema>;
 
+const manifestOverlaySchema = z.object({
+  text: z.string().min(1).max(120),
+  start_s: z.number().min(0),
+  duration_s: z.number().positive(),
+  preset: z.enum(OVERLAY_PRESETS),
+  x: z.number().min(0).max(1),
+  y: z.number().min(0).max(1),
+  animation: z.enum(OVERLAY_ANIMATIONS),
+});
+const manifestSfxSchema = z.object({
+  kind: z.enum(SFX_KINDS),
+  at_s: z.number().min(0),
+  gain_db: z.number().min(-40).max(12),
+});
+
 /** POST /api/v1/projects/:id/render: everything the browser needs to render the video. */
 export const renderManifestSchema = z.object({
   render_request_id: z.string(),
@@ -273,11 +295,37 @@ export const renderManifestSchema = z.object({
         video_url: z.string().nullable().optional(),
         /** Attribution for the scene's footage, e.g. "Video by Ann on Pexels". */
         credit: z.string().max(200).nullable().optional(),
+        /** Editor fields (ADR 044); each is present only when it differs from the default. */
+        overlays: z.array(manifestOverlaySchema).max(8).optional(),
+        sfx: z.array(manifestSfxSchema).max(8).optional(),
+        voice_id: z.string().max(40).optional(),
+        voice_speed: z.number().min(0.5).max(1.5).optional(),
+        voice_gain_db: z.number().min(-40).max(12).optional(),
+        transition_seconds: z.number().min(0.1).max(2).optional(),
+        focal: z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) }).optional(),
+        trim_in_seconds: z.number().min(0).max(120).optional(),
       }),
     )
     .min(1)
     .max(LIMITS.maxProjectScenes),
   fallbacks: z.array(z.string()),
+  /** Caption look (absent: on, bold, at the bottom). */
+  captions: z
+    .object({
+      enabled: z.boolean(),
+      style: z.enum(CAPTION_STYLES),
+      position: z.enum(CAPTION_POSITIONS),
+    })
+    .optional(),
+  /** Mix settings (absent: music at 0 dB, ducked under the voice, transition sounds on). */
+  audio: z
+    .object({
+      music: z.boolean(),
+      music_gain_db: z.number().min(-40).max(12),
+      duck_under_voice: z.boolean(),
+      transition_sfx: z.boolean(),
+    })
+    .optional(),
   /** Background music direction from the blueprint (absent: the default track). */
   music: z
     .object({ mood: z.enum(MUSIC_MOODS), tempo_bpm: z.number().int().min(60).max(140) })

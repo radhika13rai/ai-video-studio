@@ -7,7 +7,18 @@ export interface NarrationClip {
   buffer: AudioBuffer | null;
   startSeconds: number;
   maxSeconds: number;
+  /** Clip level in dB (default 0). */
+  gainDb?: number;
 }
+
+export type SfxKind = "whoosh" | "hit" | "riser" | "pop" | "boom";
+export interface SfxCueAt {
+  at: number;
+  kind: SfxKind;
+  gainDb?: number;
+}
+
+const dbToGain = (db: number) => Math.pow(10, db / 20);
 
 /**
  * Mixes each scene's narration at its start time into one stereo track with the Web Audio API
@@ -19,8 +30,11 @@ export async function mixNarration(
   totalSeconds: number,
   opts: {
     music?: boolean | { mood: MusicMood; tempo_bpm: number };
-    /** Transition effects, synthesized here (no files, no licences). */
-    sfx?: { at: number; kind: "whoosh" | "hit" }[];
+    /** Music level in dB (default 0) and whether it dips under the voice (default yes). */
+    musicGainDb?: number;
+    duck?: boolean;
+    /** Sound effects, synthesized here (no files, no licences). */
+    sfx?: SfxCueAt[];
   } = {},
 ): Promise<Uint8Array> {
   const length = Math.max(1, Math.ceil(totalSeconds * SAMPLE_RATE));
@@ -33,9 +47,10 @@ export async function mixNarration(
     const gain = ctx.createGain();
     const dur = Math.min(clip.buffer.duration, clip.maxSeconds);
     const start = clip.startSeconds + 0.05; // tiny lead-in after the cut
+    const level = dbToGain(clip.gainDb ?? 0);
     gain.gain.setValueAtTime(0, start);
-    gain.gain.linearRampToValueAtTime(1, start + 0.02);
-    gain.gain.setValueAtTime(1, Math.max(start + 0.02, start + dur - 0.08));
+    gain.gain.linearRampToValueAtTime(level, start + 0.02);
+    gain.gain.setValueAtTime(level, Math.max(start + 0.02, start + dur - 0.08));
     gain.gain.linearRampToValueAtTime(0, start + dur);
     src.connect(gain).connect(ctx.destination);
     src.start(start, 0, dur);
@@ -50,9 +65,10 @@ export async function mixNarration(
         opts.music === true ? undefined : opts.music.mood,
         opts.music === true ? undefined : opts.music.tempo_bpm,
       ),
+      { gain: dbToGain(opts.musicGainDb ?? 0), duck: opts.duck ?? true },
     );
   for (const cue of opts.sfx ?? [])
-    if (cue.at < totalSeconds - 0.1) (cue.kind === "whoosh" ? addWhoosh : addHit)(ctx, cue.at);
+    if (cue.at < totalSeconds - 0.1) SFX[cue.kind](ctx, cue.at, dbToGain(cue.gainDb ?? 0));
   const rendered = await ctx.startRendering();
   return encodeWav([rendered.getChannelData(0), rendered.getChannelData(1)], SAMPLE_RATE);
 }
@@ -144,6 +160,7 @@ function addBackingTrack(
   total: number,
   spoken: [number, number][],
   plan: MusicPlan,
+  mix: { gain: number; duck: boolean } = { gain: 1, duck: true },
 ) {
   const BEAT = 60 / plan.tempo_bpm;
   const bus = ctx.createGain();
@@ -152,11 +169,11 @@ function addBackingTrack(
   filter.frequency.value = plan.brightness;
   bus.connect(filter).connect(ctx.destination);
   // Ducking: music at 0.16 normally, 0.06 under narration, with short ramps.
-  const LOUD = 0.16;
-  const QUIET = 0.06;
+  const LOUD = 0.16 * mix.gain;
+  const QUIET = (mix.duck ? 0.06 : 0.16) * mix.gain;
   bus.gain.setValueAtTime(0, 0);
   bus.gain.linearRampToValueAtTime(LOUD, 1.2);
-  for (const [a, b] of spoken) {
+  for (const [a, b] of mix.duck ? spoken : []) {
     bus.gain.setTargetAtTime(QUIET, Math.max(0, a - 0.25), 0.08);
     bus.gain.setTargetAtTime(LOUD, b + 0.1, 0.3);
   }
@@ -232,7 +249,7 @@ export async function decodeAudio(bytes: ArrayBuffer): Promise<AudioBuffer | nul
 }
 
 /** Filtered noise sweeping upwards: an air "whoosh" for whip, slide and zoom transitions. */
-function addWhoosh(ctx: OfflineAudioContext, at: number): void {
+function addWhoosh(ctx: OfflineAudioContext, at: number, level = 1): void {
   const seconds = 0.5;
   const noise = ctx.createBuffer(1, Math.ceil(seconds * ctx.sampleRate), ctx.sampleRate);
   const data = noise.getChannelData(0);
@@ -251,7 +268,7 @@ function addWhoosh(ctx: OfflineAudioContext, at: number): void {
   const gain = ctx.createGain();
   gain.gain.setValueAtTime(0.0001, at);
   // Band-passed noise keeps only a slice of its energy, so the peak gain is high (≈ −16 dB out).
-  gain.gain.exponentialRampToValueAtTime(0.9, at + seconds * 0.55);
+  gain.gain.exponentialRampToValueAtTime(0.9 * level, at + seconds * 0.55);
   gain.gain.exponentialRampToValueAtTime(0.0001, at + seconds);
   src.connect(band).connect(gain).connect(ctx.destination);
   src.start(at);
@@ -259,16 +276,81 @@ function addWhoosh(ctx: OfflineAudioContext, at: number): void {
 }
 
 /** A soft low thump for flash transitions. */
-function addHit(ctx: OfflineAudioContext, at: number): void {
+function addHit(ctx: OfflineAudioContext, at: number, level = 1): void {
   const osc = ctx.createOscillator();
   osc.type = "sine";
   osc.frequency.setValueAtTime(110, at);
   osc.frequency.exponentialRampToValueAtTime(45, at + 0.25);
   const gain = ctx.createGain();
   gain.gain.setValueAtTime(0.0001, at);
-  gain.gain.exponentialRampToValueAtTime(0.22, at + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.22 * level, at + 0.01);
   gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.3);
   osc.connect(gain).connect(ctx.destination);
   osc.start(at);
   osc.stop(at + 0.32);
 }
+
+/** Noise rising in pitch and level for 1.2 s, ending on the cue: builds tension into a cut. */
+function addRiser(ctx: OfflineAudioContext, at: number, level = 1): void {
+  const seconds = 1.2;
+  const start = Math.max(0, at - seconds);
+  const noise = ctx.createBuffer(1, Math.ceil(seconds * ctx.sampleRate), ctx.sampleRate);
+  const data = noise.getChannelData(0);
+  let seed = 987654 + Math.round(at * 1000);
+  for (let i = 0; i < data.length; i++) {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    data[i] = (seed / 0x7fffffff) * 2 - 1;
+  }
+  const src = ctx.createBufferSource();
+  src.buffer = noise;
+  const band = ctx.createBiquadFilter();
+  band.type = "bandpass";
+  band.Q.value = 2;
+  band.frequency.setValueAtTime(300, start);
+  band.frequency.exponentialRampToValueAtTime(5000, start + seconds);
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.0001, start);
+  gain.gain.exponentialRampToValueAtTime(0.7 * level, start + seconds * 0.95);
+  gain.gain.exponentialRampToValueAtTime(0.0001, start + seconds + 0.05);
+  src.connect(band).connect(gain).connect(ctx.destination);
+  src.start(start);
+  src.stop(start + seconds + 0.06);
+}
+
+/** A short bright blip: text appearing, a point being made. */
+function addPop(ctx: OfflineAudioContext, at: number, level = 1): void {
+  const osc = ctx.createOscillator();
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(900, at);
+  osc.frequency.exponentialRampToValueAtTime(1500, at + 0.05);
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.0001, at);
+  gain.gain.exponentialRampToValueAtTime(0.18 * level, at + 0.005);
+  gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.09);
+  osc.connect(gain).connect(ctx.destination);
+  osc.start(at);
+  osc.stop(at + 0.1);
+}
+
+/** A deep, long sub drop for big reveals. */
+function addBoom(ctx: OfflineAudioContext, at: number, level = 1): void {
+  const osc = ctx.createOscillator();
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(70, at);
+  osc.frequency.exponentialRampToValueAtTime(30, at + 0.9);
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.0001, at);
+  gain.gain.exponentialRampToValueAtTime(0.4 * level, at + 0.02);
+  gain.gain.exponentialRampToValueAtTime(0.0001, at + 1.0);
+  osc.connect(gain).connect(ctx.destination);
+  osc.start(at);
+  osc.stop(at + 1.05);
+}
+
+const SFX: Record<SfxKind, (ctx: OfflineAudioContext, at: number, level: number) => void> = {
+  whoosh: addWhoosh,
+  hit: addHit,
+  riser: addRiser,
+  pop: addPop,
+  boom: addBoom,
+};

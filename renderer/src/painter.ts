@@ -40,7 +40,16 @@ export interface FrameContext {
   title: string;
   parallax: ParallaxRenderer | null;
   grain: CanvasPattern[] | null;
+  /** Caption look (default: on, bold, bottom). */
+  captions?: CaptionLook;
 }
+
+export interface CaptionLook {
+  enabled: boolean;
+  style: "bold" | "minimal" | "karaoke";
+  position: "bottom" | "middle" | "top";
+}
+const DEFAULT_CAPTIONS: CaptionLook = { enabled: true, style: "bold", position: "bottom" };
 
 const FONT = '"Inter", "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif';
 const HIGHLIGHT = "#ffd84d";
@@ -75,8 +84,11 @@ export function paintFrame(ctx: Ctx2D, fc: FrameContext, frame: number): void {
   paintVignette(ctx, w, h);
   const media = fc.media[current.index] as SceneMedia;
   const seconds = (frame - current.startFrame) / FPS;
-  if (media.image) paintCaptions(ctx, w, h, media.words, seconds);
-  else paintKineticText(ctx, w, h, media.words, seconds);
+  const look = fc.captions ?? DEFAULT_CAPTIONS;
+  // Text cards always show their words (they are the picture); captions can be switched off.
+  if (!media.image) paintKineticText(ctx, w, h, media.words, seconds);
+  else if (look.enabled) paintCaptions(ctx, w, h, media.words, seconds, look);
+  for (const o of current.scene.overlays ?? []) paintOverlay(ctx, w, h, o, seconds);
   if (frame < 2.4 * FPS) paintTitle(ctx, w, h, fc.title, frame / FPS);
   else if (current.scene.on_screen_text)
     paintLabel(ctx, w, h, current.scene.on_screen_text, seconds);
@@ -122,9 +134,16 @@ function paintScene(ctx: Ctx2D, fc: FrameContext, timed: TimedScene, frame: numb
   // Gentle handheld drift so the frame is never perfectly still.
   const seed = timed.index * 7 + index;
   const drift = shot.drift ?? 1;
-  const panX = lerp(shot.panX[0], shot.panX[1], m) + 0.03 * drift * Math.sin(frame * 0.071 + seed);
+  // The editor's focal point shifts the framing towards what matters in the picture.
+  const focal = timed.scene.focal ?? { x: 0.5, y: 0.5 };
+  const panX =
+    lerp(shot.panX[0], shot.panX[1], m) +
+    0.03 * drift * Math.sin(frame * 0.071 + seed) +
+    (focal.x - 0.5) * 2;
   const panY =
-    lerp(shot.panY[0], shot.panY[1], m) + 0.025 * drift * Math.sin(frame * 0.053 + seed * 2);
+    lerp(shot.panY[0], shot.panY[1], m) +
+    0.025 * drift * Math.sin(frame * 0.053 + seed * 2) +
+    (focal.y - 0.5) * 2;
   const crop = coverRect(
     media.image.width,
     media.image.height,
@@ -286,11 +305,25 @@ function layoutWords(
   return placed;
 }
 
-function paintCaptions(ctx: Ctx2D, w: number, h: number, groups: TimedWord[][], seconds: number) {
+const CAPTION_Y: Record<CaptionLook["position"], (w: number, h: number) => number> = {
+  bottom: (w, h) => h * (w < h ? 0.72 : 0.8),
+  middle: (_w, h) => h * 0.5,
+  top: (w, h) => h * (w < h ? 0.26 : 0.22),
+};
+
+function paintCaptions(
+  ctx: Ctx2D,
+  w: number,
+  h: number,
+  groups: TimedWord[][],
+  seconds: number,
+  look: CaptionLook = DEFAULT_CAPTIONS,
+) {
   const now = activeWords(groups, seconds);
   if (!now) return;
-  const size = Math.round(Math.min(w, h) * 0.075);
-  ctx.font = `900 ${size}px ${FONT}`;
+  const minimal = look.style === "minimal";
+  const size = Math.round(Math.min(w, h) * (minimal ? 0.05 : 0.075));
+  ctx.font = `${minimal ? 600 : 900} ${size}px ${FONT}`;
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
   ctx.lineJoin = "round";
@@ -299,9 +332,20 @@ function paintCaptions(ctx: Ctx2D, w: number, h: number, groups: TimedWord[][], 
     now.group,
     w * 0.84,
     w / 2,
-    h * (w < h ? 0.72 : 0.8),
+    CAPTION_Y[look.position](w, h),
     size * 1.18,
   );
+  if (minimal) {
+    for (const p of placed) {
+      ctx.save();
+      ctx.shadowColor = "rgba(0,0,0,0.85)";
+      ctx.shadowBlur = size * 0.35;
+      ctx.fillStyle = "#ffffff";
+      ctx.fillText(p.word.text, p.x, p.y);
+      ctx.restore();
+    }
+    return;
+  }
   // The group pops in when it first appears.
   const groupAge = seconds - (now.group[0]?.start ?? seconds);
   const groupScale = groupAge < 0.12 ? 0.85 + (Math.max(0, groupAge) / 0.12) * 0.15 : 1;
@@ -313,6 +357,16 @@ function paintCaptions(ctx: Ctx2D, w: number, h: number, groups: TimedWord[][], 
     ctx.save();
     ctx.translate(p.x + p.width / 2, p.y);
     ctx.scale(scale, scale);
+    if (active && look.style === "karaoke") {
+      // A highlight block behind the word being said.
+      const padX = size * 0.14;
+      ctx.fillStyle = HIGHLIGHT;
+      ctx.fillRect(-p.width / 2 - padX, -size * 0.6, p.width + 2 * padX, size * 1.2);
+      ctx.fillStyle = "#111111";
+      ctx.fillText(p.word.text, -p.width / 2, 0);
+      ctx.restore();
+      continue;
+    }
     ctx.lineWidth = Math.max(5, size * 0.18);
     ctx.strokeStyle = "rgba(0,0,0,0.92)";
     ctx.strokeText(p.word.text, -p.width / 2, 0);
@@ -473,5 +527,95 @@ function paintCredit(ctx: Ctx2D, w: number, h: number, credit: string): void {
   ctx.shadowColor = "rgba(0,0,0,0.6)";
   ctx.shadowBlur = size / 2;
   ctx.fillText(credit.slice(0, 80), size, h - size * 1.6);
+  ctx.restore();
+}
+
+type Overlay = NonNullable<TimedScene["scene"]["overlays"]>[number];
+
+const OVERLAY_STYLE: Record<
+  Overlay["preset"],
+  { size: number; weight: number; box: boolean; italic: boolean; bar: boolean }
+> = {
+  title: { size: 0.085, weight: 900, box: false, italic: false, bar: false },
+  lower_third: { size: 0.045, weight: 700, box: true, italic: false, bar: true },
+  label: { size: 0.045, weight: 800, box: true, italic: false, bar: false },
+  quote: { size: 0.055, weight: 600, box: false, italic: true, bar: false },
+};
+
+/** An editor text overlay, shown for its time window with its entrance animation. */
+export function paintOverlay(ctx: Ctx2D, w: number, h: number, o: Overlay, seconds: number): void {
+  const local = seconds - o.start_s;
+  if (local < 0 || local > o.duration_s) return;
+  const st = OVERLAY_STYLE[o.preset];
+  const size = Math.round(Math.min(w, h) * st.size);
+  const inT = clamp01(local / 0.35);
+  const outT = clamp01((o.duration_s - local) / 0.25);
+  let alpha = Math.min(1, outT);
+  let dy = 0;
+  let scale = 1;
+  let text = o.text;
+  switch (o.animation) {
+    case "fade":
+      alpha *= ease(inT);
+      break;
+    case "pop":
+      alpha *= clamp01(local / 0.12);
+      scale = 0.7 + 0.3 * ease(inT) + 0.06 * Math.sin(Math.PI * inT);
+      break;
+    case "slide_up":
+      alpha *= ease(inT);
+      dy = (1 - ease(inT)) * size * 1.2;
+      break;
+    case "typewriter":
+      text = o.text.slice(
+        0,
+        Math.max(1, Math.ceil(o.text.length * clamp01(local / Math.min(1.5, o.duration_s * 0.6)))),
+      );
+      break;
+    case "none":
+      break;
+  }
+  if (alpha <= 0.001) return;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.font = `${st.italic ? "italic " : ""}${st.weight} ${size}px ${FONT}`;
+  ctx.textBaseline = "middle";
+  const lines = wrapText(text, w * 0.8, (x) => ctx.measureText(x).width).slice(0, 3);
+  const widths = lines.map((l) => ctx.measureText(l).width);
+  const maxW = Math.max(...widths, 1);
+  const lineH = size * 1.2;
+  const blockH = lineH * lines.length;
+  // Keep the block inside the frame.
+  const cx = Math.min(w - maxW / 2 - size * 0.6, Math.max(maxW / 2 + size * 0.6, o.x * w));
+  const cy = Math.min(h - blockH / 2 - size, Math.max(blockH / 2 + size, o.y * h)) + dy;
+  ctx.translate(cx, cy);
+  ctx.scale(scale, scale);
+  ctx.textAlign = "center";
+  if (st.box) {
+    const padX = size * 0.6;
+    const padY = size * 0.35;
+    ctx.fillStyle = "rgba(0,0,0,0.6)";
+    ctx.fillRect(-maxW / 2 - padX, -blockH / 2 - padY, maxW + 2 * padX, blockH + 2 * padY);
+    if (st.bar) {
+      ctx.fillStyle = HIGHLIGHT;
+      ctx.fillRect(
+        -maxW / 2 - padX,
+        -blockH / 2 - padY,
+        Math.max(4, size * 0.12),
+        blockH + 2 * padY,
+      );
+    }
+  }
+  lines.forEach((line, i) => {
+    const y = (i - (lines.length - 1) / 2) * lineH;
+    if (!st.box) {
+      ctx.lineJoin = "round";
+      ctx.lineWidth = Math.max(4, size * 0.16);
+      ctx.strokeStyle = "rgba(0,0,0,0.85)";
+      ctx.strokeText(line, 0, y);
+    }
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText(line, 0, y);
+  });
   ctx.restore();
 }

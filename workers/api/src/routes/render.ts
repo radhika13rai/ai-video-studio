@@ -107,6 +107,8 @@ export function registerRenderRoutes(router: Router<Ctx>): void {
       scenes,
       fallbacks,
       ...(compiled.music ? { music: compiled.music } : {}),
+      ...(compiled.captions ? { captions: compiled.captions } : {}),
+      ...(compiled.audio ? { audio: compiled.audio } : {}),
     };
     return jsonOk(manifest);
   });

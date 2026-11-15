@@ -1,6 +1,6 @@
-import type { KokoroVoiceId } from "@avs/contracts";
+import { KOKORO_VOICES, type KokoroVoiceId } from "@avs/contracts";
 import type { RenderManifest } from "@avs/schemas";
-import { decodeAudio, mixNarration, samplesToBuffer } from "./audio";
+import { decodeAudio, mixNarration, samplesToBuffer, type SfxCueAt } from "./audio";
 import type { DepthMap } from "./depth";
 import { JpegFramesSink, pickWebCodecsConfig, WebCodecsSink, type FrameSink } from "./encoders";
 import { assembleMp4, loadFFmpeg } from "./ffmpeg";
@@ -244,6 +244,7 @@ export async function renderVideo(
     title: manifest.project.title,
     parallax,
     grain: makeGrain(ctx),
+    ...(manifest.captions ? { captions: manifest.captions } : {}),
   };
   const config = opts.forceFfmpegEncode ? null : await pickWebCodecsConfig(width, height, FPS);
   const sink: FrameSink = config ? new WebCodecsSink(config, FPS) : new JpegFramesSink();
@@ -273,19 +274,17 @@ export async function renderVideo(
         buffer: voices.buffers[i] ?? null,
         startSeconds: t.startFrame / FPS,
         maxSeconds: t.frameCount / FPS,
+        ...(t.scene.voice_gain_db !== undefined ? { gainDb: t.scene.voice_gain_db } : {}),
       })),
       durationSeconds,
       {
-        music: opts.music === false ? false : (manifest.music ?? true),
-        sfx:
-          opts.sfx === false
-            ? []
-            : sfxCues(
-                timeline.slice(1).map((t) => ({
-                  seconds: t.startFrame / FPS,
-                  transition: t.scene.transition_in,
-                })),
-              ),
+        music:
+          opts.music === false || manifest.audio?.music === false
+            ? false
+            : (manifest.music ?? true),
+        musicGainDb: manifest.audio?.music_gain_db ?? 0,
+        duck: manifest.audio?.duck_under_voice ?? true,
+        sfx: mixCues(timeline, opts.sfx !== false && manifest.audio?.transition_sfx !== false),
       },
     );
     report({ stage: "audio", progress: 1 });
@@ -407,7 +406,12 @@ async function voiceScenes(
       if (worker && !worker.stopped && text) {
         const detail = `Voicing scene ${i + 1} of ${scenes.length}`;
         const words = text.split(/\s+/).length;
-        const speed = fitSpeed(words / WORDS_PER_SECOND, s.duration_seconds - 0.35);
+        const speed =
+          s.voice_speed ?? fitSpeed(words / WORDS_PER_SECOND, s.duration_seconds - 0.35);
+        // The editor can give a scene its own voice; unknown ids fall back to the chosen one.
+        const sceneVoice = KOKORO_VOICES.some((v) => v.id === s.voice_id)
+          ? (s.voice_id as KokoroVoiceId)
+          : null;
         const limit = first ? lim.firstSpeech : lim.speech;
         const say = (v: KokoroVoiceId) =>
           ticking(worker!.speak(text, v, speed, limit), (sec) =>
@@ -420,7 +424,7 @@ async function voiceScenes(
         try {
           let speech: Speech;
           try {
-            speech = await say(voice);
+            speech = await say(sceneVoice ?? voice);
           } catch (e) {
             if (voice === BACKUP_VOICE || worker.stopped) throw e;
             notes.push(`Voice ${voice} failed (${errText(e)}); switched to ${BACKUP_VOICE}.`);
@@ -504,6 +508,26 @@ async function syncFootage(
       }
     }
     const local = Math.max(0, frame - t.startFrame) / FPS;
-    await x.clip.seek(clipTime(local, t.frameCount / FPS, x.clip.duration));
+    const trim = Math.min(scenes[i]?.trim_in_seconds ?? 0, Math.max(0, x.clip.duration - 0.5));
+    await x.clip.seek(trim + clipTime(local, t.frameCount / FPS, x.clip.duration - trim));
   }
+}
+
+/** Transition effects (when on) plus every scene's placed sound effects, in seconds. */
+export function mixCues(
+  timeline: { startFrame: number; scene: RenderManifest["scenes"][number] }[],
+  transitions: boolean,
+): SfxCueAt[] {
+  const cues: SfxCueAt[] = transitions
+    ? sfxCues(
+        timeline.slice(1).map((t) => ({
+          seconds: t.startFrame / FPS,
+          transition: t.scene.transition_in,
+        })),
+      )
+    : [];
+  for (const t of timeline)
+    for (const s of t.scene.sfx ?? [])
+      cues.push({ at: t.startFrame / FPS + s.at_s, kind: s.kind, gainDb: s.gain_db });
+  return cues.sort((a, b) => a.at - b.at);
 }
