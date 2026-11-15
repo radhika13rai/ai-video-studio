@@ -5,16 +5,14 @@ import { setTextModelOverride } from "./helpers";
 import { listAssets, listJobs, listScenes, requireProject, upsertUserByEmail } from "../src/db";
 import { base64ToBytes, sniffMedia, toBytes } from "../src/providers/media-bytes";
 import {
+  codeProviders,
   generateMedia,
+  hasCodeProvider,
   NoProviderError,
   setMediaProvidersOverride,
 } from "../src/providers/registry";
 import { ProviderError, type MediaProvider, type MediaRequest } from "../src/providers/types";
-import {
-  WorkersAiFluxImage,
-  WorkersAiMeloVoice,
-  WorkersAiSdxlImage,
-} from "../src/providers/workers-ai";
+import { WorkersAiFluxImage } from "../src/providers/workers-ai";
 import { db, makeProject, makeUser } from "./helpers";
 
 // Minimal real files: a JPEG header with SOF0 (width 576, height 1024) and a 1-second 8 kHz WAV.
@@ -166,25 +164,22 @@ describe("Workers AI adapters", () => {
     expect(binding.calls[0]?.inputs.steps).toBe(4);
   });
 
-  it("SDXL asks for the native aspect ratio and accepts a binary stream", async () => {
-    const binding = ai(new Response(jpeg(768, 1344)).body);
-    const r = await new WorkersAiSdxlImage(binding).generate({
+  it("FLUX accepts a binary stream", async () => {
+    const binding = ai(new Response(jpeg(1024, 1024)).body);
+    const r = await new WorkersAiFluxImage(binding).generate({
       capability: "image",
       prompt: "x",
-      aspect_ratio: "9:16",
+      aspect_ratio: "16:9",
     });
-    expect(binding.calls[0]?.inputs).toMatchObject({ width: 768, height: 1344, num_steps: 8 });
-    expect(r.height).toBe(1344);
+    expect(r.width).toBe(1024);
   });
 
-  it("MeloTTS returns WAV narration with its duration", async () => {
-    const binding = ai({ audio: btoa(String.fromCharCode(...wav(3))) });
-    const r = await new WorkersAiMeloVoice(binding).generate({
-      capability: "voice",
-      text: " Hello there. ",
-    });
-    expect(r).toMatchObject({ mime_type: "audio/wav", duration_seconds: 3 });
-    expect(binding.calls[0]?.inputs).toEqual({ prompt: "Hello there.", lang: "en" });
+  it("registers only FLUX: SDXL-Lightning and MeloTTS are retired by Cloudflare (ADR 039)", () => {
+    setMediaProvidersOverride(null);
+    const live = { ...env, AI_MEDIA_PROVIDER: "workers-ai", AI: ai({}) } as unknown as typeof env;
+    expect(codeProviders(live).map((p) => p.name)).toEqual(["workers-ai-flux"]);
+    expect(hasCodeProvider(live, "image")).toBe(true);
+    expect(hasCodeProvider(live, "voice")).toBe(false);
   });
 
   it("rejects wrong media, missing media and classifies quota errors", async () => {
@@ -196,9 +191,10 @@ describe("Workers AI adapters", () => {
       }),
     ).rejects.toMatchObject({ kind: "bad_response" });
     await expect(
-      new WorkersAiMeloVoice(ai({ audio: btoa(String.fromCharCode(...jpeg())) })).generate({
-        capability: "voice",
-        text: "hi",
+      new WorkersAiFluxImage(ai({ image: btoa(String.fromCharCode(...wav(1))) })).generate({
+        capability: "image",
+        prompt: "x",
+        aspect_ratio: "1:1",
       }),
     ).rejects.toMatchObject({ kind: "bad_response" });
     const quota = {
@@ -408,6 +404,36 @@ describe("workflow with media providers", () => {
     ).toBe(404);
     const other = await makeProject((await makeUser()).id);
     expect((await call(API_PATHS.assetContent(other.id, img.id))).status).toBe(404);
+  }, 30_000);
+
+  it("leaves narration to the browser when no server voice provider exists", async () => {
+    setTextModelOverride(scripted(SCRIPT, BOARD));
+    setMediaProvidersOverride([fake("img-a", "image", () => jpeg())]);
+    await using introspector = await introspectWorkflow(env.PRODUCTION_WORKFLOW);
+    const created = await call(API_PATHS.projects, {
+      method: "POST",
+      body: JSON.stringify({
+        title: "Deep",
+        prompt: "Facts about the deep sea",
+        video_type: "faceless",
+        duration_seconds: 15,
+      }),
+    });
+    const projectId = ((await created.json()) as { data: { id: string } }).data.id;
+    await call(API_PATHS.projectGenerate(projectId), { method: "POST" });
+    const [instance] = await introspector.get();
+    await instance!.waitForStepResult({ name: "request-render" });
+    expect(await instance!.waitForStepResult({ name: "voice-scene-1" })).toEqual({
+      status: "skipped",
+      reason: "Narration is voiced in the browser (Kokoro) when the video renders.",
+    });
+    const user = await upsertUserByEmail(env.DB, EMAIL);
+    const assets = await listAssets(env.DB, user.id, projectId);
+    expect(assets.map((a) => a.asset_type)).toEqual(["image", "image"]);
+    const project = await requireProject(env.DB, user.id, projectId);
+    expect(project.production_config.fallbacks).toEqual([]);
+    const jobs = await listJobs(env.DB, user.id, projectId);
+    expect(jobs.some((j) => j.agent_name === "voice-director")).toBe(false);
   }, 30_000);
 
   it("keeps going with a recorded fallback when images run out of quota", async () => {

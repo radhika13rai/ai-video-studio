@@ -8,7 +8,7 @@ only stores files and keeps the workflow's state (CLAUDE.md rule 6).
 ```
 POST /projects/:id/render ─▶ manifest (scenes, timings, captions, narration text, media URLs)
   1. Load      images; depth map per image (Depth Anything V2 Small); narration voiced with
-               Kokoro-82M (server MeloTTS audio as fallback); FFmpeg core in parallel
+               Kokoro-82M (server audio only if a voice provider exists); FFmpeg core in parallel
   2. Fit       each scene lasts at least as long as its narration (+0.35 s); Kokoro speaks up to
                1.2× faster first so the video stays close to the planned length
   3. Frames    WebGL depth parallax + Canvas 2D, 30 fps: shots, transitions, word captions, grain
@@ -76,12 +76,15 @@ a copy of the ONNX `.wasm` into the build; it's unused (the runtime is pointed a
 - Kokoro and the depth model run in **background workers** (`ml.worker.ts`, one each), so the
   page stays responsive and shows a live seconds counter. Every step has a time limit (load voice
   300 s, first scene 120 s, later scenes 60 s; load depth 180 s, each picture 60 s). When one runs
-  out, that worker is terminated: remaining scenes use the server narration, or flat moves. A
-  phone that's too slow for Kokoro still gets a finished video.
+  out, that worker is terminated: remaining scenes use server narration if any exists (none since
+  ADR 039; captions carry the script), or flat moves. A phone that's too slow for Kokoro still
+  gets a finished video, and those scenes are listed as missing narration.
 - The speaking speed is chosen before speaking (≈2.6 words/s at 1×, at most 1.2×), so each scene
   is voiced once.
-- If Kokoro can't load at all (old browser, blocked download), scenes use the MeloTTS narration the
-  workflow already generated, and the result says so (`narration: "provider"`, `notes`).
+- If Kokoro can't load at all (old browser, blocked download), the video has captions but no
+  voice, and the result says so (`narration: "none"`, `notes`, `missingMedia`). The upload
+  reports voiced/total narrated scenes, and the quality check warns. Server audio is still used
+  when a voice provider exists.
 - Text-to-phoneme uses the `phonemizer` package, which bundles eSpeak NG (GPL-3.0). The same is
   true of the Python `kokoro-onnx`; check this suits how you distribute the app.
 - Not the Python `kokoro-onnx` 0.4.7 runner: Python can't run in a Worker or a browser. The model

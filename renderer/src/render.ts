@@ -49,6 +49,10 @@ export interface RenderResult {
   missingMedia: string[];
   /** What actually voiced the video and how the camera moved, for the UI and QC. */
   narration: "kokoro" | "provider" | "none";
+  /** Scenes with narration text that ended up with audio (for QC). */
+  narratedScenes: number;
+  /** Scenes that had narration text. */
+  narrationScenes: number;
   motion: "depth" | "flat";
   notes: string[];
 }
@@ -253,6 +257,8 @@ export async function renderVideo(
       encoder: sink.kind === "webcodecs" ? "webcodecs" : "ffmpeg",
       missingMedia: missing,
       narration: voices.kind,
+      narratedScenes: voices.voiced,
+      narrationScenes: manifest.scenes.filter((s) => s.narration?.trim()).length,
       motion,
       notes,
     };
@@ -298,7 +304,11 @@ async function voiceScenes(
   report: (p: RenderProgress) => void,
   notes: string[],
   missing: string[],
-): Promise<{ buffers: (AudioBuffer | null)[]; kind: RenderResult["narration"] }> {
+): Promise<{
+  buffers: (AudioBuffer | null)[];
+  kind: RenderResult["narration"];
+  voiced: number;
+}> {
   const scenes = manifest.scenes;
   const buffers: (AudioBuffer | null)[] = scenes.map(() => null);
   let usedKokoro = false;
@@ -310,7 +320,7 @@ async function voiceScenes(
   if (wantKokoro) {
     worker = startModelWorker();
     if (!worker)
-      notes.push("This browser can't run background workers; used the server narration.");
+      notes.push("This browser can't run background workers, so the Kokoro voice can't run.");
     else {
       try {
         await ticking(
@@ -329,7 +339,7 @@ async function voiceScenes(
             }),
         );
       } catch (e) {
-        notes.push(`Kokoro voice unavailable (${errText(e)}); used the server narration.`);
+        notes.push(`Kokoro voice unavailable (${errText(e)}).`);
         worker.terminate();
         worker = null;
       }
@@ -371,9 +381,7 @@ async function voiceScenes(
           continue;
         } catch (e) {
           if (opts.signal?.aborted) throw e;
-          notes.push(
-            `Scene ${s.scene_number}: Kokoro failed (${errText(e)}); used the server voice.`,
-          );
+          notes.push(`Scene ${s.scene_number}: Kokoro failed (${errText(e)}).`);
         }
       }
       if (s.voice_url) {
@@ -387,13 +395,14 @@ async function voiceScenes(
           if (opts.signal?.aborted) throw e;
           missing.push(`Scene ${s.scene_number} narration`);
         }
-      }
+      } else if (text) missing.push(`Scene ${s.scene_number} narration`);
     }
   } finally {
     worker?.terminate();
   }
   return {
     buffers,
+    voiced: scenes.filter((s, i) => s.narration?.trim() && buffers[i]).length,
     kind: usedKokoro ? "kokoro" : usedProvider ? "provider" : "none",
   };
 }

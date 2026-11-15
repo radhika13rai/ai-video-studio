@@ -5,7 +5,7 @@ import {
   sumProviderUsageSince,
 } from "../db";
 import type { Env } from "../env";
-import { WorkersAiFluxImage, WorkersAiMeloVoice, WorkersAiSdxlImage } from "./workers-ai";
+import { WorkersAiFluxImage } from "./workers-ai";
 import {
   ProviderError,
   type MediaCapability,
@@ -25,11 +25,13 @@ export function setMediaProvidersOverride(providers: MediaProvider[] | null): vo
 export function codeProviders(env: Env): MediaProvider[] {
   if (override) return override;
   if ((env.AI_MEDIA_PROVIDER ?? "workers-ai") !== "workers-ai" || !env.AI) return [];
-  return [
-    new WorkersAiFluxImage(env.AI),
-    new WorkersAiSdxlImage(env.AI),
-    new WorkersAiMeloVoice(env.AI),
-  ];
+  // SDXL-Lightning and MeloTTS were removed: Cloudflare retires both on 2026-11-20 (ADR 039).
+  return [new WorkersAiFluxImage(env.AI)];
+}
+
+/** True when this deploy has at least one provider in code for the capability. */
+export function hasCodeProvider(env: Env, capability: MediaCapability): boolean {
+  return codeProviders(env).some((p) => p.capability === capability);
 }
 
 /**

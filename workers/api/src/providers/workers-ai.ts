@@ -78,69 +78,6 @@ export class WorkersAiFluxImage implements MediaProvider {
   }
 }
 
-/** SDXL-Lightning: native aspect ratios (free while in beta), weaker prompt-following. */
-export class WorkersAiSdxlImage implements MediaProvider {
-  readonly name = "workers-ai-sdxl";
-  readonly capability = "image" as const;
-  readonly defaultDailyLimit = 60;
-  readonly defaultPriority = 20;
-  static readonly MODEL = "@cf/bytedance/stable-diffusion-xl-lightning";
-  constructor(private readonly ai: AiBinding) {}
-
-  async generate(req: MediaRequest): Promise<MediaResult> {
-    if (req.capability !== "image")
-      throw new ProviderError(this.name, "only makes images", "unsupported", false);
-    const size = SDXL_SIZES[req.aspect_ratio];
-    const r = await runMedia(
-      this.name,
-      this.ai,
-      WorkersAiSdxlImage.MODEL,
-      {
-        prompt: `${req.prompt}, ${VISUAL_SUFFIX}`.slice(0, 2048),
-        negative_prompt: "text, watermark, logo, blurry, distorted",
-        width: size.width,
-        height: size.height,
-        num_steps: 8,
-      },
-      "image",
-      "image",
-    );
-    return { ...r, units: 1, unit_type: "images" };
-  }
-}
-
-/** MeloTTS: free-tier narration (~$0.0002 per audio minute). Returns WAV in practice. */
-export class WorkersAiMeloVoice implements MediaProvider {
-  readonly name = "workers-ai-melotts";
-  readonly capability = "voice" as const;
-  readonly defaultDailyLimit = 300;
-  readonly defaultPriority = 10;
-  static readonly MODEL = "@cf/myshell-ai/melotts";
-  constructor(private readonly ai: AiBinding) {}
-
-  async generate(req: MediaRequest): Promise<MediaResult> {
-    if (req.capability !== "voice")
-      throw new ProviderError(this.name, "only makes speech", "unsupported", false);
-    const text = req.text.trim();
-    if (!text) throw new ProviderError(this.name, "no text to speak", "unsupported", false);
-    const r = await runMedia(
-      this.name,
-      this.ai,
-      WorkersAiMeloVoice.MODEL,
-      { prompt: text.slice(0, 2000), lang: req.lang ?? "en" },
-      "audio",
-      "audio",
-    );
-    return { ...r, units: 1, unit_type: "clips" };
-  }
-}
-
-const SDXL_SIZES: Record<AspectRatio, { width: number; height: number }> = {
-  "9:16": { width: 768, height: 1344 },
-  "16:9": { width: 1344, height: 768 },
-  "1:1": { width: 1024, height: 1024 },
-};
-
 /** Square output gets cropped for 9:16 and 16:9, so ask for a centred subject. */
 function compositionHint(ratio: AspectRatio): string {
   if (ratio === "9:16")

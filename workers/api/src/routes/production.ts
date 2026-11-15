@@ -149,6 +149,7 @@ export function registerProductionRoutes(router: Router<Ctx>): void {
       ctx,
       plan.success ? plan.data.visual_style : "image",
       plan.success ? plan.data.narration : true,
+      env,
     );
     await mergeProductionConfig(db, user.id, projectId, { fallbacks });
     return jsonOk({

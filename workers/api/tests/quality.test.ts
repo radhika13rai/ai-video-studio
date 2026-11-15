@@ -7,6 +7,7 @@ import { sniffMedia } from "../src/providers/media-bytes";
 import { setMediaProvidersOverride } from "../src/providers/registry";
 import { ProviderError, type MediaProvider } from "../src/providers/types";
 import { plausibleRenderPlan, runQualityChecks } from "../src/quality/check";
+import { narrationReport } from "../src/routes/render";
 import { bytesReader, inspectMp4, Mp4Error, r2Reader } from "../src/quality/mp4";
 
 const fixture = (name: string) =>
@@ -130,6 +131,57 @@ describe("quality checks", () => {
       status: "fail",
       detail: expect.stringMatching(/planned 30 s/),
     });
+  });
+
+  it("judges narration from the renderer's report when there are no voice files", async () => {
+    const images = [{ scene_id: "s1", asset_type: "image" as const }];
+    const voiced = await runQualityChecks({
+      project: { aspect_ratio: "9:16", duration_seconds: 2 },
+      scenes,
+      assets: images,
+      narrationPlanned: true,
+      renderNarration: { kind: "kokoro", voiced: 2, total: 2 },
+      video: video("sample-2s.mp4"),
+    });
+    expect(voiced.checks.find((c) => c.id === "narration")).toMatchObject({
+      status: "pass",
+      detail: "2 of 2 narrated scenes have audio (Kokoro voice).",
+    });
+    expect(voiced.checks.find((c) => c.id === "audio")?.status).toBe("pass");
+
+    // The voice said it worked but the file is silent: that's a broken render.
+    const lost = await runQualityChecks({
+      project: { aspect_ratio: "9:16", duration_seconds: 2 },
+      scenes,
+      assets: images,
+      narrationPlanned: true,
+      renderNarration: { kind: "kokoro", voiced: 2, total: 2 },
+      video: video("sample-noaudio.mp4"),
+    });
+    expect(lost.checks.find((c) => c.id === "audio")?.status).toBe("fail");
+
+    // No voice at all in this browser: a warning with advice, not a failed video.
+    const none = await runQualityChecks({
+      project: { aspect_ratio: "9:16", duration_seconds: 2 },
+      scenes,
+      assets: images,
+      narrationPlanned: true,
+      renderNarration: { kind: "none", voiced: 0, total: 2 },
+      video: video("sample-noaudio.mp4"),
+    });
+    expect(none.overall_status).not.toBe("failed");
+    expect(none.checks.find((c) => c.id === "narration")).toMatchObject({ status: "warn" });
+    expect(none.checks.find((c) => c.id === "audio")).toMatchObject({ status: "warn" });
+  });
+
+  it("parses the renderer's narration headers strictly", () => {
+    const h = (kind: string, n: string) =>
+      new Headers({ "x-video-narration": kind, "x-video-narrated-scenes": n });
+    expect(narrationReport(h("kokoro", "3/4"))).toEqual({ kind: "kokoro", voiced: 3, total: 4 });
+    expect(narrationReport(h("kokoro", "5/4"))).toBeNull();
+    expect(narrationReport(h("melotts", "1/1"))).toBeNull();
+    expect(narrationReport(h("none", "x"))).toBeNull();
+    expect(narrationReport(new Headers())).toBeNull();
   });
 
   it("doesn't fail a render whose scenes were lengthened to fit the narration", async () => {
@@ -348,12 +400,19 @@ describe("quality report and scene retry in production", () => {
       const up = await call(API_PATHS.projectRenderUpload(projectId, m.render_request_id), {
         method: "POST",
         body: fixture("sample-15s.mp4"),
-        headers: { "content-type": "video/mp4" },
+        headers: {
+          "content-type": "video/mp4",
+          "x-video-narration": "kokoro",
+          "x-video-narrated-scenes": "3/3",
+        },
       });
       const asset = (
-        (await up.json()) as { data: { id: string; metadata: { duration_seconds: number } } }
+        (await up.json()) as {
+          data: { id: string; metadata: { duration_seconds: number; narration: unknown } };
+        }
       ).data;
       expect(asset.metadata.duration_seconds).toBe(15); // measured from the file, not trusted from the client
+      expect(asset.metadata.narration).toEqual({ kind: "kokoro", voiced: 3, total: 3 });
       await call(API_PATHS.projectRenderComplete(projectId), {
         method: "POST",
         headers: { "content-type": "application/json" },

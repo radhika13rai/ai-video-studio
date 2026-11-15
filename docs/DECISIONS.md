@@ -241,3 +241,15 @@ description repeated in each scene's prompt; names never reach the image model. 
 gated by a run parameter. **Why:** structure and pacing are craft rules that templates encode
 reliably and for free; the model is good at specifics but unreliable at structure; one extra
 call keeps the free quota impact small; gating keeps Workflows replay safe for waiting runs.
+
+## 039. Retire SDXL-Lightning and MeloTTS; narration only in the browser (2026-11-15)
+
+Cloudflare's model catalogue lists `@cf/bytedance/stable-diffusion-xl-lightning` and
+`@cf/myshell-ai/melotts` with a planned deprecation date of 2026-11-20. Both adapters are
+removed. FLUX schnell is the only image provider (square, cropped by the renderer). Narration is
+voiced only by Kokoro in the browser; the workflow skips server narration when no voice provider
+is registered, and the renderer reports voiced/total narrated scenes with the upload
+(`x-video-narration`, `x-video-narrated-scenes`), which the quality check uses instead of voice
+assets. **Why:** the only Workers AI replacement voice (Deepgram Aura) is metered per character,
+Kokoro already voices the final video and sounds better, and the owner chose the free option.
+Existing registry rows for the removed providers stay in D1 and are ignored.

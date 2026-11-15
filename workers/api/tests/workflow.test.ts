@@ -141,7 +141,8 @@ describe("production workflow", () => {
     expect(notes[0]).toMatch(
       /6 of 6 scenes have no generated image \(No image provider is configured\)/,
     );
-    expect(notes[1]).toMatch(/6 of 6 scenes have no narration audio/);
+    // No server voice provider: narration is left to the browser, so it isn't a fallback.
+    expect(notes).toHaveLength(1);
 
     const jobs = await listJobs(env.DB, user.id, projectId);
     expect(jobs.slice(0, 4).map((j) => [j.agent_name, j.status])).toEqual([
@@ -170,9 +171,9 @@ describe("production workflow", () => {
     const saved = await listScenes(env.DB, user.id, projectId);
     expect(saved[0]?.visual_prompt).toMatch(/Style: bioluminescent/);
     expect(saved[0]?.visual_prompt).toMatch(/Avoid: text overlays/);
-    // One image and one narration job per scene, completed with a recorded fallback.
+    // One image job per scene, completed with a recorded fallback; no server narration jobs.
     expect(jobs.filter((j) => j.agent_name === "visual-artist")).toHaveLength(6);
-    expect(jobs.filter((j) => j.agent_name === "voice-director")).toHaveLength(6);
+    expect(jobs.filter((j) => j.agent_name === "voice-director")).toHaveLength(0);
     expect(jobs.every((j) => j.status === "completed")).toBe(true);
     expect(await listScenes(env.DB, user.id, projectId)).toHaveLength(6);
     const run = await getLatestWorkflowRun(env.DB, user.id, projectId);
