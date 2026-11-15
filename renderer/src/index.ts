@@ -10,3 +10,10 @@ export { buildTimeline, captionChunks, outputSize, FPS, type Quality } from "./t
 export { pickWebCodecsConfig } from "./encoders";
 export { resetFFmpeg } from "./ffmpeg";
 export { encodeWav } from "./wav";
+export {
+  createPreview,
+  type PreviewController,
+  type PreviewOptions,
+  type PreviewState,
+} from "./preview";
+export { browserVoiceCache, memoryVoiceCache, speechKey, type VoiceCache } from "./voice-cache";

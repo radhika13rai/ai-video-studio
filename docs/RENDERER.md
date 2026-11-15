@@ -151,6 +151,30 @@ same. Verified in headless Chromium: karaoke captions at the top, a popping titl
 lower third, a reframed picture, a 1.5 s crossfade, and with music off only the placed boom,
 pop and riser in the audio (no automatic whoosh when transition effects are off).
 
+## Live preview (ADR 046)
+
+`createPreview(canvas, manifest)` plays a manifest in real time for the editor, using the same
+painter (`paintFrame`), scene timing (`prepare.ts`: narration-fitted lengths, caption word
+timing) and offline audio mix as the export, so the preview matches the video.
+
+- Master clock: the Web Audio context. The full mix (narration, music, sound effects) is
+  rendered once per build and played from the current offset; each animation frame paints the
+  frame for the current time.
+- 360×640 (9:16) by default, flat camera moves (no depth model), footage played as video and
+  kept within 0.25 s of the clock (the export still seeks frame by frame).
+- `update(manifest)` rebuilds after an edit, reusing downloaded pictures, recordings and clips.
+- Narration comes from the voice cache or a stored recording. `voice()` voices the remaining
+  lines with Kokoro on request and caches them.
+
+**Voice cache** (`voice-cache.ts`): Kokoro lines in IndexedDB, keyed by SHA-256 of voice, speed
+and text (`speechPlan` decides these the same way for preview and export), at most 200 lines.
+The export checks the cache first and loads the Kokoro model only for lines that aren't cached;
+it caches what it voices. Without IndexedDB the cache is empty and everything still works.
+
+Verified in headless Chromium: 1.16 s of playback in 1.2 s, seek to 7.16 s, pause holds, an
+update to 16:9 rebuilds at 1138×640 with the new length, the cached line counts as voiced, and an
+export with that cache had Kokoro narration without loading the model (3.6 s).
+
 ## Following the Creative Director
 
 When the project has a blueprint, the manifest carries per-scene `shot`, `camera`,

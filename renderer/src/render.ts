@@ -6,18 +6,18 @@ import { JpegFramesSink, pickWebCodecsConfig, WebCodecsSink, type FrameSink } fr
 import { assembleMp4, loadFFmpeg } from "./ffmpeg";
 import { makeGrain, paintFrame, type FrameContext, type SceneMedia } from "./painter";
 import { ParallaxRenderer } from "./parallax";
-import {
-  buildTimeline,
-  FPS,
-  outputSize,
-  TRANSITION_FRAMES,
-  wordGroups,
-  wordTimings,
-  type Quality,
-} from "./timeline";
+import { buildTimeline, FPS, outputSize, TRANSITION_FRAMES, type Quality } from "./timeline";
 import { startModelWorker, type ModelWorker } from "./ml";
 import { BACKUP_VOICE, DEFAULT_VOICE, fitSpeed, type Speech } from "./voice";
 import { clipTime, loadClip, sfxCues, type VideoClip } from "./video";
+import {
+  fitDurations,
+  loadPicture,
+  sceneWords,
+  VOICE_TAIL_SECONDS,
+  withDurations,
+} from "./prepare";
+import { browserVoiceCache, speechKey, type VoiceCache } from "./voice-cache";
 
 export type RenderStage = "loading" | "frames" | "audio" | "encoding" | "done";
 
@@ -44,6 +44,8 @@ export interface RenderOptions {
   music?: boolean;
   /** Whooshes and hits on planned transitions (default on). */
   sfx?: boolean;
+  /** Where voiced lines are cached (default: this browser's IndexedDB). */
+  voiceCache?: VoiceCache;
   /** 3D-depth camera moves (default on; falls back to flat moves if unavailable). */
   depth?: boolean;
   /** Override the on-device model time limits in milliseconds (tests). */
@@ -103,10 +105,9 @@ export async function renderVideo(
     let image: ImageBitmap | null = null;
     if (s.image_url) {
       try {
-        const res = await doFetch(s.image_url, fetchInit);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        blob = await res.blob();
-        image = await createImageBitmap(blob);
+        const pic = await loadPicture(s.image_url, doFetch, fetchInit);
+        blob = pic?.blob ?? null;
+        image = pic?.image ?? null;
       } catch (e) {
         if (opts.signal?.aborted) throw e;
         missing.push(`Scene ${s.scene_number} image`);
@@ -202,27 +203,22 @@ export async function renderVideo(
   check(opts.signal);
 
   // 2. Fit scene lengths to the narration, so no sentence is cut off.
-  const durations = scenes.map((s, i) => {
-    const v = voices.buffers[i];
-    return v ? Math.max(s.duration_seconds, v.duration + 0.35) : s.duration_seconds;
-  });
-  const timedManifest: RenderManifest = {
-    ...manifest,
-    scenes: scenes.map((s, i) => ({ ...s, duration_seconds: durations[i] ?? s.duration_seconds })),
-  };
-  const { scenes: timeline, totalFrames } = buildTimeline(timedManifest);
+  const durations = fitDurations(
+    scenes,
+    voices.buffers.map((b) => b?.duration ?? null),
+  );
+  const { scenes: timeline, totalFrames } = buildTimeline(withDurations(manifest, durations));
 
   const media: SceneMedia[] = scenes.map((s, i) => {
-    const dur = durations[i] ?? s.duration_seconds;
-    const v = voices.buffers[i];
-    const text = s.narration?.trim() || s.caption;
-    const words = v
-      ? wordTimings(text, 0.05, Math.min(v.duration, dur - 0.05))
-      : wordTimings(text, 0.2, Math.max(0.5, dur - 0.5));
     const hasFootage = !!footage[i]?.blob;
     return {
       image: images[i] ?? null, // replaced by the clip's frame while it plays
-      words: wordGroups(words, hasFootage || images[i] ? 4 : 6),
+      words: sceneWords(
+        s,
+        durations[i] ?? s.duration_seconds,
+        voices.buffers[i]?.duration ?? null,
+        hasFootage || !!images[i],
+      ),
       gpu: !hasFootage && !!parallax?.has(i),
     };
   });
@@ -366,7 +362,18 @@ async function voiceScenes(
   let usedProvider = false;
 
   const lim = { ...LIMITS, ...opts.limits };
-  const wantKokoro = opts.narrator !== "provider" && scenes.some((s) => s.narration?.trim());
+  const cache = opts.voiceCache ?? browserVoiceCache();
+  const useKokoro = opts.narrator !== "provider";
+  // Lines voiced before (in the preview or an earlier render) come from the cache.
+  const cached = await Promise.all(
+    scenes.map(async (s) => {
+      const plan = useKokoro ? speechPlan(s, opts.voice ?? DEFAULT_VOICE) : null;
+      if (!plan) return null;
+      const hit = await cache.get(await speechKey(plan.text, plan.voice, plan.speed));
+      return hit ? samplesToBuffer(hit.samples, hit.sampleRate) : null;
+    }),
+  );
+  const wantKokoro = useKokoro && scenes.some((s, i) => s.narration?.trim() && !cached[i]);
   let worker: ModelWorker | null = null;
   if (wantKokoro) {
     worker = startModelWorker();
@@ -403,15 +410,16 @@ async function voiceScenes(
     for (const [i, s] of scenes.entries()) {
       check(opts.signal);
       const text = s.narration?.trim();
+      const hit = cached[i];
+      if (hit) {
+        buffers[i] = hit;
+        usedKokoro = true;
+        continue;
+      }
       if (worker && !worker.stopped && text) {
         const detail = `Voicing scene ${i + 1} of ${scenes.length}`;
-        const words = text.split(/\s+/).length;
-        const speed =
-          s.voice_speed ?? fitSpeed(words / WORDS_PER_SECOND, s.duration_seconds - 0.35);
-        // The editor can give a scene its own voice; unknown ids fall back to the chosen one.
-        const sceneVoice = KOKORO_VOICES.some((v) => v.id === s.voice_id)
-          ? (s.voice_id as KokoroVoiceId)
-          : null;
+        const { speed, voice: planned } = speechPlan(s, voice) ?? { speed: 1, voice };
+        const sceneVoice = s.voice_id && planned !== voice ? planned : null;
         const limit = first ? lim.firstSpeech : lim.speech;
         const say = (v: KokoroVoiceId) =>
           ticking(worker!.speak(text, v, speed, limit), (sec) =>
@@ -434,6 +442,7 @@ async function voiceScenes(
           first = false;
           buffers[i] = samplesToBuffer(speech.samples, speech.sampleRate);
           usedKokoro = true;
+          void cache.put(await speechKey(text, sceneVoice ?? voice, speed), speech);
           continue;
         } catch (e) {
           if (opts.signal?.aborted) throw e;
@@ -530,4 +539,25 @@ export function mixCues(
     for (const s of t.scene.sfx ?? [])
       cues.push({ at: t.startFrame / FPS + s.at_s, kind: s.kind, gainDb: s.gain_db });
   return cues.sort((a, b) => a.at - b.at);
+}
+
+/**
+ * What Kokoro should say for a scene and how: the text, the scene's own voice (or `fallback`),
+ * and its speed (set by the editor, or fitted so the line fits the scene). Null when silent.
+ * Shared with the live preview so both produce (and cache) the same line.
+ */
+export function speechPlan(
+  s: RenderManifest["scenes"][number],
+  fallback: KokoroVoiceId,
+): { text: string; voice: KokoroVoiceId; speed: number } | null {
+  const text = s.narration?.trim();
+  if (!text) return null;
+  const words = text.split(/\s+/).length;
+  const speed =
+    s.voice_speed ?? fitSpeed(words / WORDS_PER_SECOND, s.duration_seconds - VOICE_TAIL_SECONDS);
+  // The editor can give a scene its own voice; unknown ids fall back to the chosen one.
+  const voice = KOKORO_VOICES.some((v) => v.id === s.voice_id)
+    ? (s.voice_id as KokoroVoiceId)
+    : fallback;
+  return { text, voice, speed };
 }

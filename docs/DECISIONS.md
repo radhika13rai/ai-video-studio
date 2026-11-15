@@ -337,3 +337,14 @@ server is offered for restore (flagged when it started from an older revision). 
 uses pointer events (mouse and pen drag after 8 px; touch needs a 300 ms long press so the
 timeline still scrolls) with pure geometry helpers, and every drag has a button or keyboard
 equivalent. No editor or drag-and-drop library was added.
+
+## 046. Live preview reuses the export pipeline; voice lines cached in IndexedDB (2026-11-15)
+
+The preview is a second caller of the renderer, not a separate player: shared stages
+(`fitDurations`, `withDurations`, `sceneWords`, `speechPlan`) and the same `paintFrame` and
+`mixNarration`, driven by the audio clock instead of an encoder. To stay real-time on phones it
+skips the depth model, plays footage as video with drift correction, and renders at 640 px tall.
+Kokoro narration is not generated automatically (it takes tens of seconds on a phone); the user
+asks for it, and lines are cached by content hash so the export and later previews reuse them.
+**Why:** one implementation guarantees the preview matches the exported video, and the cache
+turns the slowest step of rendering into a one-time cost.
