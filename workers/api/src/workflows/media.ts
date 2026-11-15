@@ -1,5 +1,12 @@
 import type { AspectRatio } from "@avs/types";
-import { createAsset, deleteAsset, listAssets, listScenes, updateSceneStatus } from "../db";
+import {
+  createAsset,
+  deleteAsset,
+  deleteTimeline,
+  listAssets,
+  listScenes,
+  updateSceneStatus,
+} from "../db";
 import type { Env } from "../env";
 import { generateMedia, hasCodeProvider, NoProviderError } from "../providers/registry";
 import type { MediaRequest } from "../providers/types";
@@ -36,6 +43,7 @@ export async function prepareMediaStage(ctx: StepContext, env: Env): Promise<Sce
     const { storage_key } = await deleteAsset(ctx.db, ctx.userId, asset.id);
     await env.MEDIA?.delete(storage_key);
   }
+  await deleteTimeline(ctx.db, ctx.userId, ctx.projectId);
   const scenes = await listScenes(ctx.db, ctx.userId, ctx.projectId);
   return scenes.map((s) => ({
     id: s.id,

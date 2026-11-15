@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.9.0 (2026-11-15)
+
+- Editable timelines (editor step E1): every project has a typed timeline (clips in order, each
+  with its media, length, framing, camera, transition, voice, caption, text overlays and sound
+  effects; plus captions, music and transition sounds). It is saved in D1 with conflict
+  protection and up to 20 snapshots for version history.
+- The render plan is now compiled from the timeline. An unedited project renders exactly as
+  before; a saved edit (order, lengths, captions, narration text, aspect ratio, music) is what
+  renders.
+- Timeline API: read, save, version history and restore.
+
 ## 1.8.0 (2026-11-15)
 
 - Paid image-to-video (fal.ai, Wan 2.5), built and **switched off**: when turned on with a key

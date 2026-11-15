@@ -8,6 +8,7 @@ import { handleHealth } from "./routes/health";
 import { registerMediaRoutes } from "./routes/media";
 import { registerProductionRoutes } from "./routes/production";
 import { registerRenderRoutes, serveVendor } from "./routes/render";
+import { registerTimelineRoutes } from "./routes/timeline";
 import { registerProjectRoutes, type Ctx } from "./routes/projects";
 
 export { ProductionWorkflow } from "./workflows/production-workflow";
@@ -17,6 +18,7 @@ registerProjectRoutes(router);
 registerProductionRoutes(router);
 registerMediaRoutes(router);
 registerRenderRoutes(router);
+registerTimelineRoutes(router);
 
 async function handleApi(request: Request, env: Env, url: URL, getKeys?: KeyFetcher) {
   // Health is public so uptime checks work without signing in.

@@ -296,3 +296,18 @@ is $0.10–0.12/s but needs a Google Cloud setup, Kling/Seedance prices vary by 
 approved building it switched off; turning it on is a separate decision. **Why:** the job
 system, budgets and breaker from ADR 040 make a paid, slow provider safe to add, and keeping it
 behind three switches means no money is spent by accident.
+
+## 043. A typed, persisted timeline compiled into the render manifest (2026-11-15)
+
+`TimelineV1` (packages/schemas/timeline.ts) is the editable source of truth for a video: clips in
+order play back to back on one magnetic track; voice, caption, overlays and sound effects belong
+to their clip with clip-relative times; music is one bed. It is stored as validated JSON in D1
+(`timelines`, one row per project, with `revision` for optimistic concurrency; snapshots every
+5 minutes or on restore in `timeline_revisions`, at most 20). Media is referenced by asset id and
+checked to belong to the project on save; references to replaced media are repaired to the
+scene's newest file. `timelineFromProduction` builds the default timeline and `compileTimeline`
+turns any timeline into manifest scenes; both are pure and shared by the server and the editor.
+A new production run deletes the old timeline. **Why:** editing needs one durable, typed
+document; magnetic clips match phone editors and keep reordering trivial; compiling (rather
+than teaching the renderer about timelines) keeps the renderer, upload and quality pipeline
+unchanged, and a test proves unedited projects render byte-for-byte the same plan.

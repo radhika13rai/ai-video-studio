@@ -1,7 +1,7 @@
 import { ApiError } from "./errors";
 
 export type Params = Record<string, string>;
-type Method = "GET" | "POST" | "PATCH" | "DELETE";
+type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 type Handler<C> = (ctx: C, params: Params) => Promise<Response>;
 
 interface Route<C> {

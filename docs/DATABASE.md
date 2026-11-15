@@ -5,19 +5,21 @@ Data access: `workers/api/src/db/` (the only code that writes SQL).
 
 ## Tables
 
-| Table              | Holds                                                         | Deleted with project     |
-| ------------------ | ------------------------------------------------------------- | ------------------------ |
-| `users`            | One row per verified identity (email, unique)                 | n/a                      |
-| `projects`         | The video request, its settings, status and config JSON       | n/a                      |
-| `scenes`           | The storyboard: one row per scene, unique per `scene_number`  | yes (cascade)            |
-| `jobs`             | Agent work items with status and retry policy                 | yes (cascade)            |
-| `assets`           | Metadata for media stored in R2 (`storage_key`), never bytes  | yes (cascade)            |
-| `providers`        | Routing registry: enabled, priority, health, quota, breaker   | n/a (global)             |
-| `provider_jobs`    | Long-running provider work (submit/poll), deadline, cost      | yes (cascade)            |
-| `workflow_runs`    | Durable workflow executions and their current step            | yes (cascade)            |
-| `usage_events`     | Provider usage: units, tier, estimated and actual cost, user  | no (`project_id` → NULL) |
-| `quality_reports`  | QC results: status, score, checks, recommendations            | yes (cascade)            |
-| `idempotency_keys` | Stored POST responses for safe retries (24 h, migration 0002) | with the user            |
+| Table                | Holds                                                         | Deleted with project     |
+| -------------------- | ------------------------------------------------------------- | ------------------------ |
+| `users`              | One row per verified identity (email, unique)                 | n/a                      |
+| `projects`           | The video request, its settings, status and config JSON       | n/a                      |
+| `scenes`             | The storyboard: one row per scene, unique per `scene_number`  | yes (cascade)            |
+| `jobs`               | Agent work items with status and retry policy                 | yes (cascade)            |
+| `assets`             | Metadata for media stored in R2 (`storage_key`), never bytes  | yes (cascade)            |
+| `providers`          | Routing registry: enabled, priority, health, quota, breaker   | n/a (global)             |
+| `timelines`          | The project's editable timeline (JSON) and its `revision`     | yes (cascade)            |
+| `timeline_revisions` | Up to 20 snapshots of the timeline (history, recovery)        | yes (cascade)            |
+| `provider_jobs`      | Long-running provider work (submit/poll), deadline, cost      | yes (cascade)            |
+| `workflow_runs`      | Durable workflow executions and their current step            | yes (cascade)            |
+| `usage_events`       | Provider usage: units, tier, estimated and actual cost, user  | no (`project_id` → NULL) |
+| `quality_reports`    | QC results: status, score, checks, recommendations            | yes (cascade)            |
+| `idempotency_keys`   | Stored POST responses for safe retries (24 h, migration 0002) | with the user            |
 
 ## Rules
 
@@ -65,7 +67,8 @@ pnpm --filter @avs/api db:migrate:remote   # Cloudflare (after the D1 database e
 Never edit an applied migration; add the next numbered file. Migration 0003 (ADR 040) rebuilt
 `providers` and `usage_events` to allow the `image_to_video` and `sfx` capabilities (SQLite can't
 alter a CHECK), keeping every row and filling `usage_events.user_id` from the project, and added
-`provider_jobs`. Tests apply all migrations to a fresh local D1
+`provider_jobs`. Migration 0004 (ADR 043) added `timelines` and
+`timeline_revisions`. Tests apply all migrations to a fresh local D1
 before each test file.
 
 ## Free-tier limits

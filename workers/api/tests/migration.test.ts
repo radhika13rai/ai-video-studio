@@ -24,6 +24,8 @@ const TABLES = [
   "providers",
   "quality_reports",
   "scenes",
+  "timeline_revisions",
+  "timelines",
   "usage_events",
   "users",
   "workflow_runs",

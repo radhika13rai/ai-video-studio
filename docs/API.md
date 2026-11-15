@@ -47,6 +47,10 @@ Every endpoint except `/health` needs a signed-in user. See `SECURITY.md`.
 | POST | `/projects/:id/generate` | optional `Idempotency-Key` | 202 `{ project_id, workflow_run_id, status: "planning" }` |
 | POST | `/projects/:id/cancel` | – | The cancelled project |
 | GET | `/projects/:id/run` | – | Latest workflow run or `null` |
+| GET | `/projects/:id/timeline` | – | `{ project_id, revision, timeline, updated_at }`; revision 0 = built from the production, not yet saved |
+| PUT | `/projects/:id/timeline` | `{ base_revision, timeline }` (≤ 256 KB) | The saved timeline (revision + 1); 409 `CONFLICT` if another save came first; 400 on an invalid timeline or a reference outside the project |
+| GET | `/projects/:id/timeline/revisions` | – | Snapshots, newest first: `{ revision, reason, created_at }` |
+| POST | `/projects/:id/timeline/revisions/:rev/restore` | `{ base_revision }` | Restores a snapshot as the newest revision |
 | GET | `/providers` | – | Every capability with its providers: availability, health, tier, price, pause state, usage today |
 | GET | `/providers/costs` | – | `{ paid: { enabled, daily_budget_usd, user_daily_budget_usd, spent_today_usd, you_spent_today_usd }, today, last_30_days }` |
 
