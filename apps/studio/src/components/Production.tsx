@@ -112,14 +112,57 @@ export function PipelineSteps({ steps }: { steps: ReturnType<typeof pipelineStep
   );
 }
 
+/** What the Creative Director's blueprint says about one scene (shown with the storyboard). */
+export interface SceneDirection {
+  beat: string | null;
+  shot: string | null;
+  camera: string | null;
+}
+
+/** Reads beat names and camera notes per scene number from production_config.blueprint. */
+export function sceneDirections(config: Record<string, unknown>): Map<number, SceneDirection> {
+  const out = new Map<number, SceneDirection>();
+  const bp = config.blueprint as
+    | {
+        narrative?: { beats?: { id?: unknown; name?: unknown }[] };
+        scenes?: { scene_number?: unknown; beat_id?: unknown; shot?: unknown; camera?: unknown }[];
+      }
+    | undefined;
+  if (!bp || !Array.isArray(bp.scenes)) return out;
+  const names = new Map(
+    (bp.narrative?.beats ?? []).map((b) => [
+      String(b.id),
+      typeof b.name === "string" ? b.name : null,
+    ]),
+  );
+  for (const s of bp.scenes) {
+    if (typeof s.scene_number !== "number") continue;
+    const str = (v: unknown) => (typeof v === "string" ? v.replace(/_/g, " ") : null);
+    out.set(s.scene_number, {
+      beat: names.get(String(s.beat_id)) ?? null,
+      shot: str(s.shot),
+      camera: str(s.camera),
+    });
+  }
+  return out;
+}
+
+/** Assumptions the Creative Director made about an ambiguous request. */
+export function blueprintAssumptions(config: Record<string, unknown>): string[] {
+  const a = (config.blueprint as { assumptions?: unknown } | undefined)?.assumptions;
+  return Array.isArray(a) ? a.filter((x): x is string => typeof x === "string") : [];
+}
+
 export function SceneList({
   scenes,
   assets = [],
+  directions,
   onRetry,
   retrying,
 }: {
   scenes: Scene[];
   assets?: Asset[];
+  directions?: Map<number, SceneDirection>;
   /** When set, scenes missing an image or narration get a "Retry media" button. */
   onRetry?: (sceneId: string) => void;
   retrying?: string | null;
@@ -161,6 +204,16 @@ export function SceneList({
                   {s.duration_seconds}s · {s.visual_type}
                 </span>
               </div>
+              {(() => {
+                const d = directions?.get(s.scene_number);
+                if (!d) return null;
+                const camera = [d.shot && `${d.shot} shot`, d.camera].filter(Boolean).join(", ");
+                return (
+                  <p className="scene-direction small muted">
+                    {d.beat && <span className="chip small">{d.beat}</span>} {camera}
+                  </p>
+                );
+              })()}
               {s.voiceover && <p className="voiceover">“{s.voiceover}”</p>}
               {s.visual_prompt && <p className="visual muted">🎨 {s.visual_prompt}</p>}
               {(() => {

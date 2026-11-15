@@ -45,13 +45,22 @@ export function scriptWords(script: Script): number {
 const inputSchema = z.object({
   brief: briefSchema,
   plan: productionPlanSchema,
+  /** Creative Director guidance (new runs only). */
+  guidance: z
+    .object({
+      beats: z.array(z.object({ name: z.string(), purpose: z.string() })).max(8),
+      key_message: z.string().max(240),
+      audience: z.string().max(120),
+      call_to_action: z.string().max(120).nullable(),
+    })
+    .optional(),
 });
 
 export async function runScriptwriter(
   model: TextModel,
   input: unknown,
 ): Promise<AgentResult<Script>> {
-  const { brief, plan } = parseInput("scriptwriter", inputSchema, input);
+  const { brief, plan, guidance } = parseInput("scriptwriter", inputSchema, input);
   const maxWords = Math.round(plan.word_budget * 1.2);
   // Live testing showed models write far too little at a loose minimum; a 30 s video needs ~75 words.
   const minWords = Math.round(plan.word_budget * 0.7);
@@ -76,6 +85,14 @@ export async function runScriptwriter(
     `between ${minWords} and ${maxWords}. Use ${Math.max(1, plan.scene_count - 1)} to ${plan.scene_count} segments`,
     `of two sentences and about ${Math.round(plan.word_budget / plan.scene_count)} words each.`,
     `call_to_action may be null if it doesn't fit the video.`,
+    ...(guidance
+      ? [
+          `Story structure, in order: ${guidance.beats.map((b) => `${b.name} (${b.purpose})`).join(" → ")}.`,
+          guidance.key_message ? `Key message: ${guidance.key_message}` : "",
+          guidance.audience ? `Audience: ${guidance.audience}` : "",
+          guidance.call_to_action ? `Suggested call to action: ${guidance.call_to_action}` : "",
+        ].filter(Boolean)
+      : []),
   ].join("\n");
 
   const { value, meta } = await runStructured({

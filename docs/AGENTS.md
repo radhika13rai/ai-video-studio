@@ -22,6 +22,33 @@ narration, presenter and the provider capabilities needed. Scene count is durati
 and 20; the word budget is 2.5 spoken words per second. **Why deterministic:** routing doesn't need
 a model (CLAUDE.md rule 15); rules are free, instant and testable.
 
+## Creative Director (`src/creative/`)
+
+Turns the request into a validated **production blueprint** (`production_config.blueprint`,
+`ProductionBlueprint` v1): story structure and beats, a style bible, recurring characters, music,
+pacing, and per scene the beat, shot size, camera move, transition, narration, on-screen text,
+sound-effect ideas and asset requirements. **Rules decide; the model only proposes.**
+
+| Part           | Kind          | Does                                                                                                                                                                                                                                        |
+| -------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `templates.ts` | deterministic | Per type: structure (AIDA, tutorial, three-act, story, listicle), beats, pacing, camera, transitions, music, look                                                                                                                           |
+| `ambiguity.ts` | deterministic | Cleans markup/code/JSON/links; flags vague, conflicting, too-dense, non-English and injection prompts as assumptions or issues                                                                                                              |
+| `interpret.ts` | **model**     | One `runStructured` call: subject, audience, key message, characters, style, must-include/avoid, ambiguities. Sanitised (no instruction text, no invented full names); rules fallback on no model, quota or invalid output                  |
+| `compose.ts`   | deterministic | Merges plan + interpretation + script + storyboard; storyboard values outside the vocabulary are replaced by the template's (recorded); character descriptions (never names) and the style suffix are added to every relevant visual prompt |
+| `validate.ts`  | deterministic | Durations sum to the length, beats contiguous, references resolve, first scene cuts in, no repeated transition, narration density (≤ 3.2 words/s, warning), prompt length; result always passes the schema                                  |
+
+Workflow (new runs only, gated by the `blueprint: 1` run parameter so waiting runs replay
+unchanged): `director → creative-director → scriptwriter (+ beats, key message) → storyboard
+(+ optional shot/camera/transition/characters/sfx/on_screen_text) → blueprint → media`. The
+blueprint step rewrites scene visual prompts with the enriched ones. Neither new step can fail
+production: interpretation falls back to rules, and a blueprint error is recorded as
+`blueprint_error` while the storyboard is used as it is. The project page lists the
+assumptions and shows each scene's beat and camera note.
+
+Not yet: multi-voice dialogue (`dialogue` is always empty), sound-effect generation, and image
+seeds for stronger character consistency (consistency is text-based, so it improves but isn't
+guaranteed).
+
 ## Structured output
 
 `runStructured` asks the model for JSON and sends the JSON Schema generated from the agent's Zod
