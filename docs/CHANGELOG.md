@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.8.0 (2026-11-15)
+
+- Paid image-to-video (fal.ai, Wan 2.5), built and **switched off**: when turned on with a key
+  and a daily budget, video-style projects animate each generated image into a short clip as a
+  long-running job, within the budget, keeping the image as the fallback.
+- Fallback notes for video-style projects count scenes with real motion (stock footage or an
+  animated image).
+
 ## 1.7.0 (2026-11-15)
 
 - Free stock footage: video-style projects (advertisement, cinematic, presenter) use a real

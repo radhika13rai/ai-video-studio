@@ -28,6 +28,7 @@ import {
 } from "../db";
 import type { Env } from "../env";
 import {
+  animateSceneImage,
   markSceneReady,
   prepareMediaStage,
   produceSceneMedia,
@@ -266,6 +267,12 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, ProductionParams
           ? await step.do("video-plan", async () => hasCodeProvider(this.env, "video"))
           : false;
 
+      // Paid image-to-video, only when switched on with a budget and a key (ADR 042).
+      const useAnimation =
+        mediaV2 && plan.visual_style === "video"
+          ? await step.do("animate-plan", async () => hasCodeProvider(this.env, "image_to_video"))
+          : false;
+
       // One durable step per scene and medium: a failure on scene 5 never redoes scenes 1–4.
       const outcomes: SceneOutcome[] = [];
       for (const scene of scenes) {
@@ -291,8 +298,19 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, ProductionParams
           video.status === "ok"
             ? { status: "skipped", reason: "Scene uses stock footage." }
             : await media("image");
+        const animated: MediaOutcome =
+          useAnimation && image.status === "ok"
+            ? await animateSceneImage(
+                step,
+                ctx,
+                this.env,
+                scene,
+                image.asset_id,
+                brief.aspect_ratio,
+              )
+            : { status: "skipped", reason: "Not animated." };
         const voice = await media("voice");
-        outcomes.push({ scene: scene.scene_number, image, voice, video });
+        outcomes.push({ scene: scene.scene_number, image, voice, video, animated });
       }
 
       const fallbacks = await step.do("summarize-assets", async () => {

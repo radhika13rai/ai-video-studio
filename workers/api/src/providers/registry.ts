@@ -11,6 +11,7 @@ import {
 } from "../db";
 import type { Env } from "../env";
 import { paidSettings, planRoute, secretOf, startOfUtcDay, type RoutePlan } from "./policy";
+import { FalWanImageToVideo } from "./fal";
 import { PexelsStockVideo } from "./pexels";
 import { WorkersAiFluxImage } from "./workers-ai";
 import {
@@ -39,6 +40,8 @@ export function codeProviders(env: Env): MediaProvider[] {
   if (env.AI) out.push(new WorkersAiFluxImage(env.AI));
   // Free stock footage; skipped by routing until the PEXELS_API_KEY secret is set (ADR 041).
   out.push(new PexelsStockVideo(() => secretOf(env, "PEXELS_API_KEY")));
+  // Paid: runs only with PAID_PROVIDERS=on, a daily budget and the FAL_KEY secret (ADR 042).
+  out.push(new FalWanImageToVideo(() => secretOf(env, "FAL_KEY")));
   return out;
 }
 

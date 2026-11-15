@@ -175,10 +175,14 @@ describe("Workers AI adapters", () => {
     expect(r.width).toBe(1024);
   });
 
-  it("registers FLUX and Pexels only: SDXL-Lightning and MeloTTS are retired (ADR 039)", () => {
+  it("registers FLUX, Pexels and fal: SDXL-Lightning and MeloTTS are retired (ADR 039)", () => {
     setMediaProvidersOverride(null);
     const live = { ...env, AI_MEDIA_PROVIDER: "workers-ai", AI: ai({}) } as unknown as typeof env;
-    expect(codeProviders(live).map((p) => p.name)).toEqual(["workers-ai-flux", "pexels-video"]);
+    expect(codeProviders(live).map((p) => p.name)).toEqual([
+      "workers-ai-flux",
+      "pexels-video",
+      "fal-wan25-i2v",
+    ]);
     expect(hasCodeProvider(live, "image")).toBe(true);
     expect(hasCodeProvider(live, "voice")).toBe(false);
     // Stock video is usable only once its key is set.

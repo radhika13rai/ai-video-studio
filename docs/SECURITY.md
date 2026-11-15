@@ -55,6 +55,8 @@ Within a project, only the browser render holding the current attempt token (fro
 - `PEXELS_API_KEY` (free stock footage) is a Worker secret like any other key. Clips are
   downloaded server-side only from Pexels and Vimeo hosts (redirects elsewhere are refused),
   capped at 30 MB and checked to be real MP4 video before they are stored.
+- `FAL_KEY` (paid image-to-video) is a Worker secret. Job references must be `queue.fal.run`
+  URLs, and results are downloaded only from fal hosts (60 MB cap) and checked to be MP4 video.
 - Paid providers also need `PAID_PROVIDERS="on"` and a daily budget above 0 (plain variables,
   off by default); each paid call reserves its estimated cost atomically within the budget.
 - The R2 bucket is private; media will be served through authenticated endpoints (Task 9).

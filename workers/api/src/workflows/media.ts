@@ -3,6 +3,7 @@ import { createAsset, deleteAsset, listAssets, listScenes, updateSceneStatus } f
 import type { Env } from "../env";
 import { generateMedia, hasCodeProvider, NoProviderError } from "../providers/registry";
 import type { MediaRequest } from "../providers/types";
+import { runMediaJob, type JobSteps } from "./media-jobs";
 import { stockQuery } from "../providers/pexels";
 
 /** The per-scene media the production workflow makes. */
@@ -166,6 +167,78 @@ export async function produceSceneMedia(
   );
 }
 
+/**
+ * Animates a scene's generated image with a paid image-to-video provider (ADR 042), as a
+ * long-running job: submit, wait, poll, fall over. The clip is stored next to the image, which
+ * stays as the fallback. Returns a fallback (never throws) when no provider can do it.
+ */
+export async function animateSceneImage(
+  step: JobSteps,
+  ctx: StepContext,
+  env: Env,
+  scene: SceneRef,
+  imageAssetId: string,
+  aspect: AspectRatio,
+): Promise<MediaOutcome> {
+  const media = env.MEDIA;
+  if (!media) return { status: "fallback", reason: "Media storage (R2) isn't configured." };
+  const key = `${runPrefix(ctx)}scene-${scene.scene_number}-video.mp4`;
+  const out = await runMediaJob(
+    step,
+    { db: ctx.db, env, owner: { userId: ctx.userId, projectId: ctx.projectId } },
+    `animate-scene-${scene.scene_number}`,
+    async () => {
+      const asset = (await listAssets(ctx.db, ctx.userId, ctx.projectId)).find(
+        (a) => a.id === imageAssetId,
+      );
+      const object = asset ? await media.get(asset.storage_key) : null;
+      if (!asset || !object) throw new Error("The scene's image is missing.");
+      return {
+        capability: "image_to_video",
+        prompt:
+          `${scene.visual_prompt ?? scene.description ?? ""}. Subtle natural motion, smooth cinematic camera movement.`.slice(
+            0,
+            800,
+          ),
+        aspect_ratio: aspect,
+        duration_seconds: (scene.duration_seconds ?? 5) > 5 ? 10 : 5,
+        image: { bytes: new Uint8Array(await object.arrayBuffer()), mime_type: asset.mime_type },
+      };
+    },
+    async (result, jobId) => {
+      // Idempotent: a repeated poll after a crash finds the clip already saved.
+      const existing = (await listAssets(ctx.db, ctx.userId, ctx.projectId)).find(
+        (a) => a.storage_key === key,
+      );
+      if (existing) return key;
+      await media.put(key, result.bytes, { httpMetadata: { contentType: result.mime_type } });
+      await createAsset(ctx.db, ctx.userId, ctx.projectId, {
+        asset_type: "video",
+        storage_key: key,
+        mime_type: result.mime_type,
+        file_size: result.bytes.byteLength,
+        scene_id: scene.id,
+        source_provider: result.license?.provider ?? "image-to-video",
+        license: result.license ?? { source: "generated", model: result.model },
+        metadata: {
+          model: result.model,
+          provider_job_id: jobId,
+          animated_from: imageAssetId,
+          ...(result.duration_seconds ? { duration_seconds: result.duration_seconds } : {}),
+        },
+      });
+      return key;
+    },
+  );
+  if (out.status === "fallback") return out;
+  const asset = (await listAssets(ctx.db, ctx.userId, ctx.projectId)).find(
+    (a) => a.storage_key === key,
+  );
+  return asset
+    ? { status: "ok", asset_id: asset.id, provider: out.provider }
+    : { status: "fallback", reason: "The animated clip wasn't saved." };
+}
+
 export async function markSceneReady(ctx: StepContext, sceneId: string): Promise<void> {
   await updateSceneStatus(ctx.db, ctx.userId, sceneId, "ready");
 }
@@ -176,6 +249,8 @@ export interface SceneOutcome {
   voice: MediaOutcome;
   /** Stock footage (video-style projects; absent for older runs). */
   video?: MediaOutcome;
+  /** Paid image-to-video animation of the scene's image, when switched on. */
+  animated?: MediaOutcome;
 }
 
 /** Plain-language notes about anything that didn't go as the brief asked. */
@@ -185,9 +260,20 @@ export function summarizeFallbacks(
   outcomes: SceneOutcome[],
 ): string[] {
   const notes: string[] = [];
-  const triedVideo = outcomes.filter((o) => o.video && o.video.status !== "skipped");
-  const withVideo = triedVideo.filter((o) => o.video?.status === "ok");
-  if (visualStyle === "video" && triedVideo.length > 0) {
+  const tried = (o: MediaOutcome | undefined) => !!o && o.status !== "skipped";
+  const triedVideo = outcomes.filter((o) => tried(o.video));
+  const triedAnimation = outcomes.filter((o) => tried(o.animated));
+  // A scene has real motion with stock footage or an animated image.
+  const moving = (o: SceneOutcome) => o.video?.status === "ok" || o.animated?.status === "ok";
+  if (visualStyle === "video" && triedAnimation.length > 0) {
+    const eligible = outcomes.filter((o) => tried(o.video) || tried(o.animated));
+    const failed = eligible.find((o) => !moving(o));
+    if (failed)
+      notes.push(
+        `${eligible.filter(moving).length} of ${eligible.length} scenes have real motion (stock footage or an animated image); the others use generated still images with motion effects (${reasonOf(failed.animated?.status === "fallback" ? failed.animated : failed.video)}).`,
+      );
+  } else if (visualStyle === "video" && triedVideo.length > 0) {
+    const withVideo = triedVideo.filter((o) => o.video?.status === "ok");
     if (withVideo.length < triedVideo.length)
       notes.push(
         `${withVideo.length} of ${triedVideo.length} scenes use stock footage from Pexels; the others use generated still images with motion effects (${reasonOf(triedVideo.find((o) => o.video?.status !== "ok")?.video)}).`,
