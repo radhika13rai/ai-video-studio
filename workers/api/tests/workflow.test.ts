@@ -440,7 +440,9 @@ describe("generate endpoint guards", () => {
     try {
       const res = await call(API_PATHS.projectGenerate(projectId), { method: "POST" });
       expect(res.status).toBe(503);
-      expect(((await res.json()) as { error: { code: string } }).error.code).toBe("INTERNAL_ERROR");
+      expect(
+        ((await res.json()) as { error: { code: string } }).error.code,
+      ).toBe("INTERNAL_ERROR");
       const project = (
         (await (await call(API_PATHS.project(projectId))).json()) as { data: { status: string } }
       ).data;
