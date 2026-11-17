@@ -11,7 +11,14 @@ import { CAMERA_MOVES } from "@avs/types";
 import { env, introspectWorkflow, SELF } from "cloudflare:test";
 import { afterEach, describe, expect, it } from "vitest";
 import { fakeFacts, setTextModelOverride } from "./helpers";
-import { getLatestWorkflowRun, listAssets, requireProject, upsertUserByEmail } from "../src/db";
+import {
+  createAsset,
+  getLatestWorkflowRun,
+  listAssets,
+  requireProject,
+  upsertUserByEmail,
+} from "../src/db";
+import { cleanupSupersededRenderAssets } from "../src/routes/render";
 import { sniffMedia } from "../src/providers/media-bytes";
 import { setMediaProvidersOverride } from "../src/providers/registry";
 import type { MediaProvider } from "../src/providers/types";
@@ -487,6 +494,43 @@ describe("render attempts (one render at a time)", () => {
         .bind(old, projectId)
         .run();
       expect((await start(projectId)).status).toBe(200);
+    } finally {
+      await introspector.dispose();
+    }
+  }, 30_000);
+
+  it("does not delete an asset committed after the cleanup snapshot", async () => {
+    const { projectId, introspector } = await readyProject();
+    try {
+      const user = await upsertUserByEmail(env.DB, EMAIL);
+      const old = await createAsset(env.DB, user.id, projectId, {
+        asset_type: "render",
+        storage_key: `projects/${projectId}/runs/old/final-old.mp4`,
+        mime_type: "video/mp4",
+        file_size: 10,
+        source_provider: "browser-renderer",
+        metadata: { render_request_id: "old-request", render_attempt: "old-token" },
+      });
+      // This is the snapshot the first upload takes before inserting its own asset.
+      const snapshot = (await listAssets(env.DB, user.id, projectId)).filter(
+        (asset) => asset.asset_type === "render",
+      );
+      const newer = await createAsset(env.DB, user.id, projectId, {
+        asset_type: "render",
+        storage_key: `projects/${projectId}/runs/new/final-new.mp4`,
+        mime_type: "video/mp4",
+        file_size: 10,
+        source_provider: "browser-renderer",
+        metadata: { render_request_id: "new-request", render_attempt: "new-token" },
+      });
+
+      await cleanupSupersededRenderAssets(env.DB, user.id, env.MEDIA, snapshot, newer.id);
+
+      const remaining = (await listAssets(env.DB, user.id, projectId)).filter(
+        (asset) => asset.asset_type === "render",
+      );
+      expect(remaining.map((asset) => asset.id)).toEqual([newer.id]);
+      expect(remaining.some((asset) => asset.id === old.id)).toBe(false);
     } finally {
       await introspector.dispose();
     }
