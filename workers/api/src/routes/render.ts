@@ -86,12 +86,23 @@ export function registerRenderRoutes(router: Router<Ctx>): void {
     }
 
     // The render plan comes from the project's timeline: the saved edit, or the one its
-    // production implies (which renders exactly as before the editor existed).
-    const { timeline, assets } = await currentTimeline(db, user.id, project);
-    const compiled = compileForRender(projectId, timeline, assets);
+    // production implies (which renders exactly as before the editor existed). If preparation
+    // fails after the lease is claimed, release it so the user can correct the edit and retry.
+    let compiled: ReturnType<typeof compileForRender>;
+    try {
+      const { timeline, assets } = await currentTimeline(db, user.id, project);
+      compiled = compileForRender(projectId, timeline, assets);
+      if (compiled.scenes.length === 0)
+        throw new ApiError(409, "INVALID_STATE", "This project has no scenes to render.");
+    } catch (err) {
+      try {
+        await releaseRenderAttempt(db, user.id, projectId, attempt.token);
+      } catch (releaseError) {
+        console.error("Failed to release render attempt after manifest preparation failed", releaseError);
+      }
+      throw err;
+    }
     const scenes = compiled.scenes;
-    if (scenes.length === 0)
-      throw new ApiError(409, "INVALID_STATE", "This project has no scenes to render.");
     const fallbacks = Array.isArray(project.production_config.fallbacks)
       ? project.production_config.fallbacks.filter((f): f is string => typeof f === "string")
       : [];
