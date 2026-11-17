@@ -287,9 +287,13 @@ describe("exporting an edited video again", () => {
       END
     `).run();
     try {
-      const failed = await call(`${API_PATHS.project(projectId)}/export`, { method: "POST" });
+      const failed = await call(`${API_PATHS.project(projectId)}/export`, {
+        method: "POST",
+      });
       expect(failed.status).toBe(503);
-      expect((await requireProject(env.DB, userId, projectId)).status).toBe("completed");
+      expect((await requireProject(env.DB, userId, projectId)).status).toBe(
+        "completed",
+      );
     } finally {
       await env.DB.prepare("DROP TRIGGER IF EXISTS fail_workflow_run_insert").run();
     }
