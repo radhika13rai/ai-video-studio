@@ -53,6 +53,25 @@ function requireAttempt(project: Project, request: Request): string {
 
 const BAD_UPLOAD = (why: string) => new ApiError(400, "VALIDATION_ERROR", why);
 
+export async function cleanupSupersededRenderAssets(
+  db: D1Database,
+  userId: string,
+  media: R2Bucket,
+  previousRenderAssets: Awaited<ReturnType<typeof listAssets>>,
+  keepAssetId: string,
+): Promise<void> {
+  for (const old of previousRenderAssets.filter(
+    (asset) => asset.asset_type === "render" && asset.id !== keepAssetId,
+  )) {
+    try {
+      const { storage_key: key } = await deleteAsset(db, userId, old.id);
+      await media.delete(key);
+    } catch (err) {
+      console.warn("Old render cleanup failed", err instanceof Error ? err.message : err);
+    }
+  }
+}
+
 export function registerRenderRoutes(router: Router<Ctx>): void {
   const base = `${API_PREFIX}/projects/:id/render`;
 
@@ -190,6 +209,17 @@ export function registerRenderRoutes(router: Router<Ctx>): void {
       await media.delete(storage_key);
       requireAttempt(now, request); // throws the stale-attempt error
     }
+    // Snapshot only assets that existed before this upload. A newer render can take over
+    // after the lease check below; its asset must never be swept up by this attempt's cleanup.
+    const previousRenderAssets = (await listAssets(db, user.id, projectId)).filter(
+      (a) => a.asset_type === "render",
+    );
+    const latest = await requireProject(db, user.id, projectId);
+    if (renderAttemptOf(latest.production_config)?.token !== token) {
+      await media.delete(storage_key);
+      requireAttempt(latest, request);
+    }
+
     const durationHeader = Number(request.headers.get("x-video-duration") ?? "");
     const narration = narrationReport(request.headers);
     const asset = await createAsset(db, user.id, projectId, {
@@ -210,17 +240,9 @@ export function registerRenderRoutes(router: Router<Ctx>): void {
         ...(narration ? { narration } : {}),
       },
     });
-    // Only now that the new video is safe, remove the previous one(s).
-    for (const old of (await listAssets(db, user.id, projectId)).filter(
-      (a) => a.asset_type === "render" && a.id !== asset.id,
-    )) {
-      try {
-        const { storage_key: key } = await deleteAsset(db, user.id, old.id);
-        await media.delete(key);
-      } catch (err) {
-        console.warn("Old render cleanup failed", err instanceof Error ? err.message : err);
-      }
-    }
+    // Never enumerate after insertion: a concurrent, newer attempt may already have
+    // committed its asset. Cleanup is limited to the pre-insert snapshot above.
+    await cleanupSupersededRenderAssets(db, user.id, media, previousRenderAssets, asset.id);
     return jsonOk(asset, 201);
   });
 
