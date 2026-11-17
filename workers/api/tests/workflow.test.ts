@@ -427,7 +427,9 @@ describe("generate endpoint guards", () => {
     await instance!.waitForStepResult({ name: "request-render" });
   });
 
-  it("restores the project status when the workflow run record cannot be created", async () => {
+  it(
+    "restores the project status when the workflow run record cannot be created",
+    async () => {
     setTextModelOverride(scripted());
     const projectId = await newProject();
     await env.DB.prepare(`
@@ -438,13 +440,17 @@ describe("generate endpoint guards", () => {
       END
     `).run();
     try {
-      const res = await call(API_PATHS.projectGenerate(projectId), { method: "POST" });
+      const res = await call(API_PATHS.projectGenerate(projectId), {
+        method: "POST",
+      });
       expect(res.status).toBe(503);
       expect(
         ((await res.json()) as { error: { code: string } }).error.code,
       ).toBe("INTERNAL_ERROR");
       const project = (
-        (await (await call(API_PATHS.project(projectId))).json()) as { data: { status: string } }
+        (await (await call(API_PATHS.project(projectId))).json()) as {
+          data: { status: string };
+        }
       ).data;
       expect(project.status).toBe("created");
     } finally {
