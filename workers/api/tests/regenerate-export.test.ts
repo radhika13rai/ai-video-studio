@@ -279,13 +279,15 @@ describe("exporting an edited video again", () => {
     });
     expect(put.status).toBe(200);
 
-    await env.DB.prepare(`
+    await env.DB.prepare(
+      `
       CREATE TRIGGER fail_workflow_run_insert
       BEFORE INSERT ON workflow_runs
       BEGIN
         SELECT RAISE(FAIL, 'simulated workflow run insert failure');
       END
-    `).run();
+    `,
+    ).run();
     try {
       const failed = await call(`${API_PATHS.project(projectId)}/export`, {
         method: "POST",
