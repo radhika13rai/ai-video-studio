@@ -92,12 +92,13 @@ export function registerRenderRoutes(router: Router<Ctx>): void {
     try {
       const { timeline, assets } = await currentTimeline(db, user.id, project);
       compiled = compileForRender(projectId, timeline, assets);
-      if (compiled.scenes.length === 0)
+      if (compiled.scenes.length === 0) {
         throw new ApiError(
           409,
           "INVALID_STATE",
           "This project has no scenes to render.",
         );
+      }
     } catch (err) {
       try {
         await releaseRenderAttempt(db, user.id, projectId, attempt.token);
