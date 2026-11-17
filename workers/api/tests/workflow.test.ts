@@ -440,6 +440,70 @@ describe("generate endpoint guards", () => {
     expect(status).toBe("created");
   });
 
+  it("restores the project when creating a workflow run record fails", async () => {
+    setTextModelOverride(scripted(SCRIPT, BOARD));
+    const projectId = await newProject();
+    const trigger = "test_fail_workflow_run_insert";
+    await env.DB.prepare(
+      `CREATE TRIGGER ${trigger} BEFORE INSERT ON workflow_runs
+       BEGIN SELECT RAISE(ABORT, 'simulated workflow run insert failure'); END`,
+    ).run();
+    try {
+      const res = await call(API_PATHS.projectGenerate(projectId), { method: "POST" });
+      expect(res.status).toBe(503);
+      expect(((await res.json()) as { error: { code: string } }).error.code).toBe(
+        "INTERNAL_ERROR",
+      );
+      const user = await upsertUserByEmail(env.DB, EMAIL);
+      expect((await requireProject(env.DB, user.id, projectId)).status).toBe("created");
+      expect(await getLatestWorkflowRun(env.DB, user.id, projectId)).toBeNull();
+    } finally {
+      await env.DB.prepare(`DROP TRIGGER IF EXISTS ${trigger}`).run();
+    }
+  });
+
+  it("restores the completed project when creating an export run record fails", async () => {
+    const projectId = await newProject();
+    const plan = {
+      video_type: "faceless",
+      classified_by: "user",
+      confidence: 1,
+      reason: "Test plan",
+      visual_style: "image",
+      narration: true,
+      presenter: false,
+      capabilities: ["text", "image", "voice", "music"],
+      scene_count: 6,
+      word_budget: 75,
+      tone: "clear and engaging",
+    };
+    await env.DB.prepare(
+      `UPDATE projects
+       SET status = 'completed',
+           production_config = json_set(production_config, '$.plan', json(?))
+       WHERE id = ?`,
+    )
+      .bind(JSON.stringify(plan), projectId)
+      .run();
+    const trigger = "test_fail_workflow_run_insert";
+    await env.DB.prepare(
+      `CREATE TRIGGER ${trigger} BEFORE INSERT ON workflow_runs
+       BEGIN SELECT RAISE(ABORT, 'simulated workflow run insert failure'); END`,
+    ).run();
+    try {
+      const res = await call(`${API_PATHS.project(projectId)}/export`, { method: "POST" });
+      expect(res.status).toBe(503);
+      expect(((await res.json()) as { error: { code: string } }).error.code).toBe(
+        "INTERNAL_ERROR",
+      );
+      const user = await upsertUserByEmail(env.DB, EMAIL);
+      expect((await requireProject(env.DB, user.id, projectId)).status).toBe("completed");
+      expect(await getLatestWorkflowRun(env.DB, user.id, projectId)).toBeNull();
+    } finally {
+      await env.DB.prepare(`DROP TRIGGER IF EXISTS ${trigger}`).run();
+    }
+  });
+
   it("hides other users' projects", async () => {
     setTextModelOverride(scripted());
     const projectId = await newProject();
