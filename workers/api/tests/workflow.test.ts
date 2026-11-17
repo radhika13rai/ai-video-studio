@@ -488,7 +488,7 @@ describe("generate endpoint guards", () => {
        BEGIN SELECT RAISE(ABORT, 'simulated workflow run insert failure'); END`,
     ).run();
     try {
-      const res = await call(API_PATHS.projectExport(projectId), { method: "POST" });
+      const res = await call(`${API_PATHS.project(projectId)}/export`, { method: "POST" });
       expect(res.status).toBe(503);
       expect(((await res.json()) as { error: { code: string } }).error.code).toBe(
         "INTERNAL_ERROR",
