@@ -430,13 +430,13 @@ describe("generate endpoint guards", () => {
   it("restores the project status when the workflow run record cannot be created", async () => {
     setTextModelOverride(scripted());
     const projectId = await newProject();
-    await env.DB.exec(`
+    await env.DB.prepare(`
       CREATE TRIGGER fail_workflow_run_insert
       BEFORE INSERT ON workflow_runs
       BEGIN
         SELECT RAISE(FAIL, 'simulated workflow run insert failure');
-      END;
-    `);
+      END
+    `).run();
     try {
       const res = await call(API_PATHS.projectGenerate(projectId), { method: "POST" });
       expect(res.status).toBe(503);
@@ -446,7 +446,7 @@ describe("generate endpoint guards", () => {
       ).data;
       expect(project.status).toBe("created");
     } finally {
-      await env.DB.exec("DROP TRIGGER IF EXISTS fail_workflow_run_insert");
+      await env.DB.prepare("DROP TRIGGER IF EXISTS fail_workflow_run_insert").run();
     }
   });
 
