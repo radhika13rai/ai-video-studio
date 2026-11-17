@@ -291,9 +291,7 @@ describe("exporting an edited video again", () => {
         method: "POST",
       });
       expect(failed.status).toBe(503);
-      expect((await requireProject(env.DB, userId, projectId)).status).toBe(
-        "completed",
-      );
+      expect((await requireProject(env.DB, userId, projectId)).status).toBe("completed");
     } finally {
       await env.DB.prepare("DROP TRIGGER IF EXISTS fail_workflow_run_insert").run();
     }
