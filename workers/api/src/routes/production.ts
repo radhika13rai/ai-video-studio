@@ -101,9 +101,17 @@ export function registerProductionRoutes(router: Router<Ctx>): void {
         try {
           await setProjectStatusIf(db, user.id, projectId, ["planning"], project.status);
         } catch (cleanupError) {
-          console.error("Failed to restore project status after workflow run record creation failed", cleanupError);
+          console.error(
+            "Failed to restore project status after workflow run record creation failed",
+            cleanupError,
+          );
         }
-        throw new ApiError(503, "INTERNAL_ERROR", "Could not start production. Try again.", true);
+        throw new ApiError(
+          503,
+          "INTERNAL_ERROR",
+          "Could not start production. Try again.",
+          true,
+        );
       }
       try {
         await env.PRODUCTION_WORKFLOW.create({
@@ -274,9 +282,17 @@ export function registerProductionRoutes(router: Router<Ctx>): void {
       try {
         await setProjectStatusIf(db, user.id, projectId, ["generating"], project.status);
       } catch (cleanupError) {
-        console.error("Failed to restore project status after workflow run record creation failed", cleanupError);
+        console.error(
+          "Failed to restore project status after workflow run record creation failed",
+          cleanupError,
+        );
       }
-      throw new ApiError(503, "INTERNAL_ERROR", "Could not start the export. Try again.", true);
+      throw new ApiError(
+        503,
+        "INTERNAL_ERROR",
+        "Could not start the export. Try again.",
+        true,
+      );
     }
     try {
       await env.PRODUCTION_WORKFLOW.create({
