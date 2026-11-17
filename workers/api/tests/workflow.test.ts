@@ -427,6 +427,29 @@ describe("generate endpoint guards", () => {
     await instance!.waitForStepResult({ name: "request-render" });
   });
 
+  it("restores the project status when the workflow run record cannot be created", async () => {
+    setTextModelOverride(scripted());
+    const projectId = await newProject();
+    await env.DB.exec(`
+      CREATE TRIGGER fail_workflow_run_insert
+      BEFORE INSERT ON workflow_runs
+      BEGIN
+        SELECT RAISE(FAIL, 'simulated workflow run insert failure');
+      END;
+    `);
+    try {
+      const res = await call(API_PATHS.projectGenerate(projectId), { method: "POST" });
+      expect(res.status).toBe(503);
+      expect(((await res.json()) as { error: { code: string } }).error.code).toBe("INTERNAL_ERROR");
+      const project = (
+        (await (await call(API_PATHS.project(projectId))).json()) as { data: { status: string } }
+      ).data;
+      expect(project.status).toBe("created");
+    } finally {
+      await env.DB.exec("DROP TRIGGER IF EXISTS fail_workflow_run_insert");
+    }
+  });
+
   it("explains when no AI model is available", async () => {
     const projectId = await newProject();
     const res = await call(API_PATHS.projectGenerate(projectId), { method: "POST" });
