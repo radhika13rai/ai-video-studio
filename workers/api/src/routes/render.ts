@@ -98,7 +98,10 @@ export function registerRenderRoutes(router: Router<Ctx>): void {
       try {
         await releaseRenderAttempt(db, user.id, projectId, attempt.token);
       } catch (releaseError) {
-        console.error("Failed to release render attempt after manifest preparation failed", releaseError);
+        console.error(
+          "Failed to release render attempt after manifest preparation failed",
+          releaseError,
+        );
       }
       throw err;
     }
