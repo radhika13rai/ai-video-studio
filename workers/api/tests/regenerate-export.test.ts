@@ -279,6 +279,21 @@ describe("exporting an edited video again", () => {
     });
     expect(put.status).toBe(200);
 
+    await env.DB.prepare(`
+      CREATE TRIGGER fail_workflow_run_insert
+      BEFORE INSERT ON workflow_runs
+      BEGIN
+        SELECT RAISE(FAIL, 'simulated workflow run insert failure');
+      END
+    `).run();
+    try {
+      const failed = await call(`${API_PATHS.project(projectId)}/export`, { method: "POST" });
+      expect(failed.status).toBe(503);
+      expect((await requireProject(env.DB, userId, projectId)).status).toBe("completed");
+    } finally {
+      await env.DB.prepare("DROP TRIGGER IF EXISTS fail_workflow_run_insert").run();
+    }
+
     const exp = await call(`${API_PATHS.project(projectId)}/export`, { method: "POST" });
     expect(exp.status).toBe(202);
     expect((await requireProject(env.DB, userId, projectId)).status).toBe("generating");
