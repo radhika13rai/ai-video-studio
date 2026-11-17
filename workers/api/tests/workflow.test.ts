@@ -478,7 +478,10 @@ describe("generate endpoint guards", () => {
       tone: "clear and engaging",
     };
     await env.DB.prepare(
-      "UPDATE projects SET status = 'completed', production_config = json_set(production_config, '$.plan', json(?)) WHERE id = ?",
+      `UPDATE projects
+       SET status = 'completed',
+           production_config = json_set(production_config, '$.plan', json(?))
+       WHERE id = ?`,
     )
       .bind(JSON.stringify(plan), projectId)
       .run();
