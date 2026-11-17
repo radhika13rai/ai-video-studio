@@ -90,11 +90,23 @@ export function registerProductionRoutes(router: Router<Ctx>): void {
         );
 
       const runId = crypto.randomUUID();
-      await createWorkflowRun(db, user.id, projectId, {
-        id: runId,
-        workflow_name: WORKFLOW_NAME,
-        workflow_instance_id: runId,
-      });
+      try {
+        await createWorkflowRun(db, user.id, projectId, {
+          id: runId,
+          workflow_name: WORKFLOW_NAME,
+          workflow_instance_id: runId,
+        });
+      } catch (err) {
+        console.error("Workflow run record create failed", err);
+        await setProjectStatusIf(db, user.id, projectId, ["planning"], project.status).catch(
+          (rollbackError) =>
+            console.error(
+              "Failed to restore project status after workflow record failure",
+              rollbackError,
+            ),
+        );
+        throw new ApiError(503, "INTERNAL_ERROR", "Could not start production. Try again.", true);
+      }
       try {
         await env.PRODUCTION_WORKFLOW.create({
           id: runId,
@@ -253,11 +265,23 @@ export function registerProductionRoutes(router: Router<Ctx>): void {
     if (!(await setProjectStatusIf(db, user.id, projectId, EXPORTABLE, "generating")))
       throw new ApiError(409, "INVALID_STATE", "An export was started by another request.", true);
     const runId = crypto.randomUUID();
-    await createWorkflowRun(db, user.id, projectId, {
-      id: runId,
-      workflow_name: WORKFLOW_NAME,
-      workflow_instance_id: runId,
-    });
+    try {
+      await createWorkflowRun(db, user.id, projectId, {
+        id: runId,
+        workflow_name: WORKFLOW_NAME,
+        workflow_instance_id: runId,
+      });
+    } catch (err) {
+      console.error("Workflow run record create failed", err);
+      await setProjectStatusIf(db, user.id, projectId, ["generating"], project.status).catch(
+        (rollbackError) =>
+          console.error(
+            "Failed to restore project status after workflow record failure",
+            rollbackError,
+          ),
+      );
+      throw new ApiError(503, "INTERNAL_ERROR", "Could not start the export. Try again.", true);
+    }
     try {
       await env.PRODUCTION_WORKFLOW.create({
         id: runId,
