@@ -385,6 +385,34 @@ describe("browser render API", () => {
     }
   }, 30_000);
 
+  it("releases the render lease when manifest preparation fails", async () => {
+    const { projectId, introspector } = await readyProject();
+    try {
+      await env.DB.prepare("DELETE FROM scenes WHERE project_id = ?").bind(projectId).run();
+
+      const failed = await call(API_PATHS.projectRender(projectId), { method: "POST" });
+      expect(failed.status).toBe(409);
+      expect(((await failed.json()) as { error: { message: string } }).error.message).toMatch(
+        /no scenes to render/,
+      );
+
+      const user = await upsertUserByEmail(env.DB, EMAIL);
+      const project = await requireProject(env.DB, user.id, projectId);
+      expect(project.status).toBe("rendering");
+      expect(project.production_config.render_attempt).toBeUndefined();
+
+      // A second attempt reaches manifest validation again, rather than being blocked by a
+      // stale lease from the failed first attempt.
+      const retry = await call(API_PATHS.projectRender(projectId), { method: "POST" });
+      expect(retry.status).toBe(409);
+      expect(((await retry.json()) as { error: { message: string } }).error.message).toMatch(
+        /no scenes to render/,
+      );
+    } finally {
+      await introspector.dispose();
+    }
+  }, 30_000);
+
   it("refuses to start a render for a project that isn't ready", async () => {
     const created = await call(API_PATHS.projects, json({ title: "T", prompt: "P" }));
     const id = ((await created.json()) as { data: { id: string } }).data.id;
