@@ -204,3 +204,23 @@ export async function cancelOpenJobs(
     .run();
   return res.meta.changes;
 }
+
+
+/** Cancels only jobs belonging to one workflow run, never a newer run's jobs. */
+export async function cancelOpenJobsForRun(
+  db: D1Database,
+  userId: string,
+  projectId: string,
+  runId: string,
+): Promise<number> {
+  const res = await db
+    .prepare(
+      `UPDATE jobs SET status = 'cancelled', completed_at = ?
+       WHERE project_id = ? AND status IN ('queued', 'running')
+         AND json_extract(input_json, '$.workflow_run_id') = ?
+         AND ${OWNED("project_id")}`,
+    )
+    .bind(nowIso(), projectId, runId, userId)
+    .run();
+  return res.meta.changes;
+}
