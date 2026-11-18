@@ -12,6 +12,7 @@ import { env, introspectWorkflow, SELF } from "cloudflare:test";
 import { afterEach, describe, expect, it } from "vitest";
 import { fakeFacts, setTextModelOverride } from "./helpers";
 import {
+  claimRenderAttempt,
   createAsset,
   getLatestWorkflowRun,
   listAssets,
@@ -503,6 +504,17 @@ describe("render attempts (one render at a time)", () => {
     const { projectId, introspector } = await readyProject();
     try {
       const user = await upsertUserByEmail(env.DB, EMAIL);
+      const liveToken = "live-render-attempt";
+      expect(
+        await claimRenderAttempt(
+          env.DB,
+          user.id,
+          projectId,
+          { token: liveToken, started_at: new Date().toISOString() },
+          new Date(Date.now() - (RENDER_LEASE_MINUTES + 1) * 60_000).toISOString(),
+          false,
+        ),
+      ).toBe(true);
       const old = await createAsset(env.DB, user.id, projectId, {
         asset_type: "render",
         storage_key: `projects/${projectId}/runs/old/final-old.mp4`,
@@ -524,13 +536,84 @@ describe("render attempts (one render at a time)", () => {
         metadata: { render_request_id: "new-request", render_attempt: "new-token" },
       });
 
-      await cleanupSupersededRenderAssets(env.DB, user.id, env.MEDIA, snapshot, newer.id);
+      await cleanupSupersededRenderAssets(
+        env.DB,
+        user.id,
+        env.MEDIA,
+        snapshot,
+        newer.id,
+        liveToken,
+      );
 
       const remaining = (await listAssets(env.DB, user.id, projectId)).filter(
         (asset) => asset.asset_type === "render",
       );
       expect(remaining.map((asset) => asset.id)).toEqual([newer.id]);
       expect(remaining.some((asset) => asset.id === old.id)).toBe(false);
+    } finally {
+      await introspector.dispose();
+    }
+  }, 30_000);
+
+  it("does not clean previous renders after the upload loses its lease", async () => {
+    const { projectId, introspector } = await readyProject();
+    try {
+      const user = await upsertUserByEmail(env.DB, EMAIL);
+      const oldToken = "old-render-attempt";
+      const newToken = "replacement-render-attempt";
+      expect(
+        await claimRenderAttempt(
+          env.DB,
+          user.id,
+          projectId,
+          { token: oldToken, started_at: new Date().toISOString() },
+          new Date(Date.now() - (RENDER_LEASE_MINUTES + 1) * 60_000).toISOString(),
+          false,
+        ),
+      ).toBe(true);
+      const old = await createAsset(env.DB, user.id, projectId, {
+        asset_type: "render",
+        storage_key: `projects/${projectId}/runs/old/final-old.mp4`,
+        mime_type: "video/mp4",
+        file_size: 10,
+        source_provider: "browser-renderer",
+        metadata: { render_request_id: "old-request", render_attempt: oldToken },
+      });
+      const snapshot = (await listAssets(env.DB, user.id, projectId)).filter(
+        (asset) => asset.asset_type === "render",
+      );
+      expect(
+        await claimRenderAttempt(
+          env.DB,
+          user.id,
+          projectId,
+          { token: newToken, started_at: new Date().toISOString() },
+          new Date(Date.now() - (RENDER_LEASE_MINUTES + 1) * 60_000).toISOString(),
+          true,
+        ),
+      ).toBe(true);
+      const newer = await createAsset(env.DB, user.id, projectId, {
+        asset_type: "render",
+        storage_key: `projects/${projectId}/runs/new/final-new.mp4`,
+        mime_type: "video/mp4",
+        file_size: 10,
+        source_provider: "browser-renderer",
+        metadata: { render_request_id: "new-request", render_attempt: newToken },
+      });
+
+      await cleanupSupersededRenderAssets(
+        env.DB,
+        user.id,
+        env.MEDIA,
+        snapshot,
+        newer.id,
+        oldToken,
+      );
+
+      const remaining = (await listAssets(env.DB, user.id, projectId)).filter(
+        (asset) => asset.asset_type === "render",
+      );
+      expect(remaining.map((asset) => asset.id).sort()).toEqual([old.id, newer.id].sort());
     } finally {
       await introspector.dispose();
     }
