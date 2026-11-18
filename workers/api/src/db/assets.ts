@@ -130,6 +130,33 @@ export async function listAssets(
   return results.map(toAsset);
 }
 
+/**
+ * Deletes an older render only while the caller still owns the active render lease.
+ * The token check and row deletion are one D1 statement, so a replaced attempt cannot
+ * remove the previous good render after losing ownership.
+ */
+export async function deleteRenderAssetIfAttempt(
+  db: D1Database,
+  userId: string,
+  projectId: string,
+  assetId: string,
+  attemptToken: string,
+): Promise<{ storage_key: string } | null> {
+  return db
+    .prepare(
+      `DELETE FROM assets
+       WHERE id = ? AND project_id = ? AND asset_type = 'render'
+         AND EXISTS (
+           SELECT 1 FROM projects p
+           WHERE p.id = assets.project_id AND p.user_id = ? AND p.status = 'rendering'
+             AND json_extract(p.production_config, '$.render_attempt.token') = ?
+         )
+       RETURNING storage_key`,
+    )
+    .bind(assetId, projectId, userId, attemptToken)
+    .first<{ storage_key: string }>();
+}
+
 /** Deletes the metadata row and returns the R2 key so the caller can delete the object. */
 export async function deleteAsset(
   db: D1Database,
