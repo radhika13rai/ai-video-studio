@@ -393,6 +393,20 @@ describe("production workflow", () => {
     expect(data.workflow_run_id).toBeTruthy();
   }, 20_000);
 
+  it("terminates a waiting production workflow when its project is deleted", async () => {
+    setTextModelOverride(scripted(SCRIPT, BOARD));
+    await using introspector = await introspectWorkflow(env.PRODUCTION_WORKFLOW);
+    const projectId = await newProject();
+    await call(API_PATHS.projectGenerate(projectId), { method: "POST" });
+    const [instance] = await introspector.get();
+    await instance!.waitForStepResult({ name: "request-render" });
+
+    const deleted = await call(API_PATHS.project(projectId), { method: "DELETE" });
+    expect(deleted.status).toBe(200);
+    await instance!.waitForStatus("terminated");
+    expect((await call(API_PATHS.project(projectId))).status).toBe(404);
+  });
+
   it("can be cancelled, and cancelled projects can start again", async () => {
     setTextModelOverride(scripted(SCRIPT, BOARD, SCRIPT, BOARD));
     await using introspector = await introspectWorkflow(env.PRODUCTION_WORKFLOW);

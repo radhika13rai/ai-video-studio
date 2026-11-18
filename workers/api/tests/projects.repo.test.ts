@@ -118,7 +118,10 @@ describe("projects", () => {
       )
       .bind(crypto.randomUUID(), p.id, key)
       .run();
-    expect(await deleteProject(db(), u.id, p.id)).toEqual({ storage_keys: [key] });
+    expect(await deleteProject(db(), u.id, p.id)).toEqual({
+      storage_keys: [key],
+      workflow_instance_id: null,
+    });
     expect(await getProject(db(), u.id, p.id)).toBeNull();
     const left = await db().prepare("SELECT COUNT(*) AS n FROM assets").first<{ n: number }>();
     expect(left?.n).toBe(0);

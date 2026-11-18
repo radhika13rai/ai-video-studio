@@ -77,7 +77,20 @@ export function registerProjectRoutes(router: Router<Ctx>): void {
   });
 
   router.on("DELETE", `${base}/:id`, async ({ env, db, user }, p) => {
-    const { storage_keys } = await deleteProject(db, user.id, id(p));
+    const { storage_keys, workflow_instance_id } = await deleteProject(db, user.id, id(p));
+    // The project and workflow rows are gone. Stop the captured workflow so it cannot sit
+    // waiting for a render event (or continue a durable step) after its project is deleted.
+    if (workflow_instance_id && env.PRODUCTION_WORKFLOW) {
+      try {
+        const instance = await env.PRODUCTION_WORKFLOW.get(workflow_instance_id);
+        await instance.terminate();
+      } catch (err) {
+        console.warn(
+          "Workflow terminate after project deletion skipped",
+          err instanceof Error ? err.message : err,
+        );
+      }
+    }
     // The rows are gone; now remove the media. R2 deletes up to 1000 keys per call.
     if (env.MEDIA) {
       for (let i = 0; i < storage_keys.length; i += 1000)
