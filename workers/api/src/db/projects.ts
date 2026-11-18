@@ -262,6 +262,35 @@ export async function setProjectStatusIf(
   return res.meta.changes === 1;
 }
 
+/** Moves a project only while the specified workflow run is still the latest active run. */
+export async function setProjectStatusIfRun(
+  db: D1Database,
+  userId: string,
+  projectId: string,
+  runId: string,
+  from: readonly ProjectStatus[],
+  to: ProjectStatus,
+): Promise<boolean> {
+  const res = await db
+    .prepare(
+      `UPDATE projects SET status = ?, updated_at = ?
+       WHERE id = ? AND user_id = ? AND status IN (${from.map(() => "?").join(", ")})
+         AND EXISTS (
+           SELECT 1 FROM workflow_runs wr
+           WHERE wr.id = ? AND wr.project_id = projects.id
+             AND wr.status IN ('running', 'waiting')
+             AND wr.id = (
+               SELECT id FROM workflow_runs
+               WHERE project_id = projects.id
+               ORDER BY created_at DESC, id DESC LIMIT 1
+             )
+         )`,
+    )
+    .bind(to, nowIso(), projectId, userId, ...from, runId)
+    .run();
+  return res.meta.changes === 1;
+}
+
 /**
  * Sets top-level keys of production_config (plan, fallbacks, render request …) in one atomic
  * UPDATE (json_set), so concurrent writers to different keys never overwrite each other.

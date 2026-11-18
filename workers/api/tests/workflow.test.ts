@@ -6,6 +6,7 @@ import { setTextModelOverride } from "./helpers";
 import { ModelError, type TextModel } from "../src/ai/text-model";
 import {
   createWorkflowRun,
+  terminateWorkflowRunIfLatest,
   createAsset,
   getLatestQualityReport,
   getLatestWorkflowRun,
@@ -84,6 +85,60 @@ async function newProject() {
 afterEach(() => setTextModelOverride(null));
 
 describe("production workflow", () => {
+  it("does not let an older workflow run cancel or fail a newer run", async () => {
+    const projectId = await newProject();
+    const user = await upsertUserByEmail(env.DB, EMAIL);
+    const olderId = crypto.randomUUID();
+    const newerId = crypto.randomUUID();
+    await createWorkflowRun(env.DB, user.id, projectId, {
+      id: olderId,
+      workflow_name: WORKFLOW_NAME,
+      workflow_instance_id: olderId,
+    });
+    await createWorkflowRun(env.DB, user.id, projectId, {
+      id: newerId,
+      workflow_name: WORKFLOW_NAME,
+      workflow_instance_id: newerId,
+    });
+
+    const projectStatuses = [
+      "created",
+      "planning",
+      "generating",
+      "awaiting_render",
+      "rendering",
+      "quality_check",
+    ] as const;
+    expect(
+      await terminateWorkflowRunIfLatest(
+        env.DB,
+        user.id,
+        projectId,
+        olderId,
+        "cancelled",
+        projectStatuses,
+        "Stale cancellation.",
+      ),
+    ).toBe(false);
+    expect(
+      await terminateWorkflowRunIfLatest(
+        env.DB,
+        user.id,
+        projectId,
+        olderId,
+        "failed",
+        projectStatuses,
+        "Stale failure.",
+      ),
+    ).toBe(false);
+
+    expect(await getLatestWorkflowRun(env.DB, user.id, projectId)).toMatchObject({
+      id: newerId,
+      status: "running",
+    });
+    expect(await requireProject(env.DB, user.id, projectId)).toMatchObject({ status: "created" });
+  });
+
   it("runs director → script → storyboard, waits for the render, then quality-checks it", async () => {
     setTextModelOverride(scripted(SCRIPT, BOARD));
     await using introspector = await introspectWorkflow(env.PRODUCTION_WORKFLOW);

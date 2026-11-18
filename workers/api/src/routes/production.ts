@@ -3,7 +3,7 @@ import type { AspectRatio, ProjectStatus } from "@avs/types";
 import { productionPlanSchema } from "../agents";
 import { textModelFor } from "../ai/factory";
 import {
-  cancelOpenJobs,
+  cancelOpenJobsForRun,
   createWorkflowRun,
   getAsset,
   getLatestWorkflowRun,
@@ -11,6 +11,7 @@ import {
   mergeProductionConfig,
   requireProject,
   setProjectStatusIf,
+  terminateWorkflowRunIfLatest,
   updateWorkflowRun,
 } from "../db";
 import { ApiError } from "../lib/errors";
@@ -119,16 +120,29 @@ export function registerProductionRoutes(router: Router<Ctx>): void {
     if (!CANCELLABLE.includes(project.status))
       throw new ApiError(409, "INVALID_STATE", `Nothing to cancel (status: ${project.status}).`);
     const run = await getLatestWorkflowRun(db, user.id, projectId);
-    if (run && ["queued", "running", "waiting"].includes(run.status)) {
-      // Mark the run first: steps check it and stop even if terminate() is slow.
-      await updateWorkflowRun(db, user.id, run.id, {
-        status: "cancelled",
-        error_message: "Cancelled by the user.",
-      });
-      await terminate(env.PRODUCTION_WORKFLOW, run.workflow_instance_id);
+    if (!run || !["queued", "running", "waiting"].includes(run.status)) {
+      throw new ApiError(409, "INVALID_STATE", "There is no active production run to cancel.");
     }
-    await cancelOpenJobs(db, user.id, projectId);
-    await setProjectStatusIf(db, user.id, projectId, CANCELLABLE, "cancelled");
+    // Terminate only the exact latest run observed above; a restart wins any race.
+    if (
+      !(await terminateWorkflowRunIfLatest(
+        db,
+        user.id,
+        projectId,
+        run.id,
+        "cancelled",
+        CANCELLABLE,
+        "Cancelled by the user.",
+      ))
+    ) {
+      throw new ApiError(
+        409,
+        "INVALID_STATE",
+        "Production changed while cancellation was in progress. Refresh and try again.",
+      );
+    }
+    await cancelOpenJobsForRun(db, user.id, projectId, run.id);
+    await terminate(env.PRODUCTION_WORKFLOW, run.workflow_instance_id);
     return jsonOk(await requireProject(db, user.id, projectId));
   });
 

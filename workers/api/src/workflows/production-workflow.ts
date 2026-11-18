@@ -24,7 +24,7 @@ import {
 } from "../creative";
 import { textModelFor } from "../ai/factory";
 import {
-  cancelOpenJobs,
+  cancelOpenJobsForRun,
   createQualityReport,
   getAsset,
   getWorkflowRun,
@@ -34,7 +34,8 @@ import {
   replaceScenes,
   requireProject,
   setProjectGraphicsTheme,
-  setProjectStatusIf,
+  setProjectStatusIfRun,
+  terminateWorkflowRunIfLatest,
   setSceneGraphicsLayouts,
   updateWorkflowRun,
   getTimeline,
@@ -355,7 +356,9 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, ProductionParams
 
         const scenes = await step.do("generate-assets", async () => {
           await ensureActive("generate-assets");
-          await setProjectStatusIf(db, userId, projectId, ["planning"], "generating");
+          if (!(await setProjectStatusIfRun(db, userId, projectId, runId, ["planning"], "generating"))) {
+            throw new NonRetryableError("This workflow run is no longer the active project run.");
+          }
           return prepareMediaStage(ctx, this.env);
         });
 
@@ -446,13 +449,18 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, ProductionParams
               ...(failure ? { last_failure: failure } : {}),
             },
           });
-          await setProjectStatusIf(
-            db,
-            userId,
-            projectId,
-            ["generating", "quality_check"],
-            "awaiting_render",
-          );
+          if (
+            !(await setProjectStatusIfRun(
+              db,
+              userId,
+              projectId,
+              runId,
+              ["generating", "quality_check"],
+              "awaiting_render",
+            ))
+          ) {
+            throw new NonRetryableError("This workflow run is no longer the active project run.");
+          }
           await updateWorkflowRun(db, userId, runId, {
             status: "waiting",
             current_step: attempt === 1 ? "awaiting-render" : `awaiting-render-${attempt}`,
@@ -480,13 +488,18 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, ProductionParams
               status: "running",
               current_step: `quality-check${sfx}`,
             });
-            await setProjectStatusIf(
-              db,
-              userId,
-              projectId,
-              ["awaiting_render", "rendering"],
-              "quality_check",
-            );
+            if (
+              !(await setProjectStatusIfRun(
+                db,
+                userId,
+                projectId,
+                runId,
+                ["awaiting_render", "rendering"],
+                "quality_check",
+              ))
+            ) {
+              throw new NonRetryableError("This workflow run is no longer the active project run.");
+            }
             const reported = video.metadata.reported_duration_seconds;
             const edited = await getTimeline(db, userId, projectId);
             const current = await requireProject(db, userId, projectId);
@@ -518,7 +531,9 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, ProductionParams
               recommendations: report.recommendations,
             });
             if (report.overall_status !== "failed") {
-              await setProjectStatusIf(db, userId, projectId, ["quality_check"], "completed");
+              if (!(await setProjectStatusIfRun(db, userId, projectId, runId, ["quality_check"], "completed"))) {
+                throw new NonRetryableError("This workflow run is no longer the active project run.");
+              }
               await updateWorkflowRun(db, userId, runId, {
                 status: "completed",
                 current_step: "done",
@@ -528,7 +543,9 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, ProductionParams
             const failed = report.checks.filter((c) => c.status === "fail").map((c) => c.detail);
             const message = `Quality check failed: ${failed.join(" ")}`;
             if (finalAttempt) {
-              await setProjectStatusIf(db, userId, projectId, ["quality_check"], "failed");
+              if (!(await setProjectStatusIfRun(db, userId, projectId, runId, ["quality_check"], "failed"))) {
+                throw new NonRetryableError("This workflow run is no longer the active project run.");
+              }
               await updateWorkflowRun(db, userId, runId, {
                 status: "failed",
                 error_message:
@@ -558,15 +575,16 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, ProductionParams
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       await step.do("record-failure", async () => {
-        const run = await getWorkflowRun(db, userId, runId);
-        if (run?.status === "cancelled") return; // the cancel endpoint already updated everything
-        await cancelOpenJobs(db, userId, projectId);
-        await setProjectStatusIf(db, userId, projectId, PRODUCTION_STATUSES, "failed");
-        if (run && !["completed", "failed", "cancelled"].includes(run.status))
-          await updateWorkflowRun(db, userId, runId, {
-            status: "failed",
-            error_message: friendly(message),
-          });
+        const failedCurrentRun = await terminateWorkflowRunIfLatest(
+          db,
+          userId,
+          projectId,
+          runId,
+          "failed",
+          PRODUCTION_STATUSES,
+          friendly(message),
+        );
+        if (failedCurrentRun) await cancelOpenJobsForRun(db, userId, projectId, runId);
       });
       throw err;
     }
