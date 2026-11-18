@@ -9,7 +9,7 @@ import { renderCompleteRequestSchema, type RenderManifest } from "@avs/schemas";
 import {
   claimRenderAttempt,
   createAsset,
-  deleteAsset,
+  deleteRenderAssetIfAttempt,
   getAsset,
   getLatestWorkflowRun,
   listAssets,
@@ -59,13 +59,20 @@ export async function cleanupSupersededRenderAssets(
   media: R2Bucket,
   previousRenderAssets: Awaited<ReturnType<typeof listAssets>>,
   keepAssetId: string,
+  attemptToken: string,
 ): Promise<void> {
   for (const old of previousRenderAssets.filter(
     (asset) => asset.asset_type === "render" && asset.id !== keepAssetId,
   )) {
     try {
-      const { storage_key: key } = await deleteAsset(db, userId, old.id);
-      await media.delete(key);
+      const removed = await deleteRenderAssetIfAttempt(
+        db,
+        userId,
+        old.project_id,
+        old.id,
+        attemptToken,
+      );
+      if (removed) await media.delete(removed.storage_key);
     } catch (err) {
       console.warn("Old render cleanup failed", err instanceof Error ? err.message : err);
     }
@@ -242,7 +249,14 @@ export function registerRenderRoutes(router: Router<Ctx>): void {
     });
     // Never enumerate after insertion: a concurrent, newer attempt may already have
     // committed its asset. Cleanup is limited to the pre-insert snapshot above.
-    await cleanupSupersededRenderAssets(db, user.id, media, previousRenderAssets, asset.id);
+    await cleanupSupersededRenderAssets(
+      db,
+      user.id,
+      media,
+      previousRenderAssets,
+      asset.id,
+      token,
+    );
     return jsonOk(asset, 201);
   });
 
