@@ -18,6 +18,55 @@ export interface WorkflowRun {
 
 const TERMINAL: WorkflowRunStatus[] = ["completed", "failed", "cancelled"];
 
+/**
+ * Atomically terminates a run and its project only if that run is still the latest active run.
+ * A late cancellation/failure from an older workflow cannot change a newer run's state.
+ */
+export async function terminateWorkflowRunIfLatest(
+  db: D1Database,
+  userId: string,
+  projectId: string,
+  runId: string,
+  status: "failed" | "cancelled",
+  projectStatuses: readonly import("@avs/types").ProjectStatus[],
+  errorMessage: string,
+): Promise<boolean> {
+  const now = nowIso();
+  const slots = projectStatuses.map(() => "?").join(", ");
+  const [runUpdate, projectUpdate] = await db.batch([
+    db
+      .prepare(
+        `UPDATE workflow_runs
+         SET status = ?, error_message = ?, completed_at = ?
+         WHERE id = ? AND project_id = ? AND status IN ('queued', 'running', 'waiting')
+           AND id = (
+             SELECT id FROM workflow_runs
+             WHERE project_id = ? ORDER BY created_at DESC, id DESC LIMIT 1
+           )
+           AND EXISTS (
+             SELECT 1 FROM projects p
+             WHERE p.id = ? AND p.user_id = ? AND p.status IN (${slots})
+           )`,
+      )
+      .bind(status, errorMessage.slice(0, 500), now, runId, projectId, projectId, projectId, userId, ...projectStatuses),
+    db
+      .prepare(
+        `UPDATE projects SET status = ?, updated_at = ?
+         WHERE id = ? AND user_id = ? AND status IN (${slots})
+           AND EXISTS (
+             SELECT 1 FROM workflow_runs wr
+             WHERE wr.id = ? AND wr.project_id = projects.id AND wr.status = ?
+           )
+           AND (
+             SELECT id FROM workflow_runs
+             WHERE project_id = projects.id ORDER BY created_at DESC, id DESC LIMIT 1
+           ) = ?`,
+      )
+      .bind(status, now, projectId, userId, ...projectStatuses, runId, status, runId),
+  ]);
+  return runUpdate.meta.changes === 1 && projectUpdate.meta.changes === 1;
+}
+
 export async function createWorkflowRun(
   db: D1Database,
   userId: string,
