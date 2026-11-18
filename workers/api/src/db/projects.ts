@@ -228,17 +228,35 @@ export async function deleteProject(
   db: D1Database,
   userId: string,
   projectId: string,
-): Promise<{ storage_keys: string[] }> {
-  const [keys, del] = await db.batch<{ storage_key: string }>([
+): Promise<{ storage_keys: string[]; workflow_instance_id: string | null }> {
+  // Capture the active workflow in the same D1 batch as deletion. The batch is atomic,
+  // so a workflow run cannot be inserted for a project after its row has been deleted.
+  const [keys, runs, del] = await db.batch<{
+    storage_key?: string;
+    workflow_instance_id?: string | null;
+  }>([
     db
       .prepare(
         "SELECT a.storage_key FROM assets a JOIN projects p ON p.id = a.project_id WHERE p.id = ? AND p.user_id = ?",
       )
       .bind(projectId, userId),
+    db
+      .prepare(
+        `SELECT wr.workflow_instance_id
+         FROM workflow_runs wr JOIN projects p ON p.id = wr.project_id
+         WHERE p.id = ? AND p.user_id = ? AND wr.status IN ('queued', 'running', 'waiting')
+         ORDER BY wr.created_at DESC, wr.id DESC LIMIT 1`,
+      )
+      .bind(projectId, userId),
     db.prepare("DELETE FROM projects WHERE id = ? AND user_id = ?").bind(projectId, userId),
   ]);
   if (!del || del.meta.changes === 0) throw notFound("project");
-  return { storage_keys: (keys?.results ?? []).map((r) => r.storage_key) };
+  return {
+    storage_keys: (keys?.results ?? []).map((r) => r.storage_key).filter(
+      (key): key is string => typeof key === "string",
+    ),
+    workflow_instance_id: runs?.results?.[0]?.workflow_instance_id ?? null,
+  };
 }
 
 /**
