@@ -249,14 +249,7 @@ export function registerRenderRoutes(router: Router<Ctx>): void {
     });
     // Never enumerate after insertion: a concurrent, newer attempt may already have
     // committed its asset. Cleanup is limited to the pre-insert snapshot above.
-    await cleanupSupersededRenderAssets(
-      db,
-      user.id,
-      media,
-      previousRenderAssets,
-      asset.id,
-      token,
-    );
+    await cleanupSupersededRenderAssets(db, user.id, media, previousRenderAssets, asset.id, token);
     return jsonOk(asset, 201);
   });
 

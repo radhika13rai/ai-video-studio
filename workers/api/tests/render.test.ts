@@ -601,14 +601,7 @@ describe("render attempts (one render at a time)", () => {
         metadata: { render_request_id: "new-request", render_attempt: newToken },
       });
 
-      await cleanupSupersededRenderAssets(
-        env.DB,
-        user.id,
-        env.MEDIA,
-        snapshot,
-        newer.id,
-        oldToken,
-      );
+      await cleanupSupersededRenderAssets(env.DB, user.id, env.MEDIA, snapshot, newer.id, oldToken);
 
       const remaining = (await listAssets(env.DB, user.id, projectId)).filter(
         (asset) => asset.asset_type === "render",
