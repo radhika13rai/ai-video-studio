@@ -85,7 +85,10 @@ export function registerProjectRoutes(router: Router<Ctx>): void {
         const instance = await env.PRODUCTION_WORKFLOW.get(workflow_instance_id);
         await instance.terminate();
       } catch (err) {
-        console.warn("Workflow terminate after project deletion skipped", err instanceof Error ? err.message : err);
+        console.warn(
+          "Workflow terminate after project deletion skipped",
+          err instanceof Error ? err.message : err,
+        );
       }
     }
     // The rows are gone; now remove the media. R2 deletes up to 1000 keys per call.

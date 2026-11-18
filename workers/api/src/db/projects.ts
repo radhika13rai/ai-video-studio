@@ -252,9 +252,9 @@ export async function deleteProject(
   ]);
   if (!del || del.meta.changes === 0) throw notFound("project");
   return {
-    storage_keys: (keys?.results ?? []).map((r) => r.storage_key).filter(
-      (key): key is string => typeof key === "string",
-    ),
+    storage_keys: (keys?.results ?? [])
+      .map((r) => r.storage_key)
+      .filter((key): key is string => typeof key === "string"),
     workflow_instance_id: runs?.results?.[0]?.workflow_instance_id ?? null,
   };
 }
