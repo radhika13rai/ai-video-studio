@@ -148,9 +148,12 @@ const PIPELINES: Record<
   },
 };
 
-/** Briefs asking for a motion-graphics explainer get graphics scenes instead of AI pictures. */
+/**
+ * Briefs asking for a motion-graphics explainer get graphics scenes instead of AI pictures.
+ * "Vox style", infographic and flat-2D asks are motion graphics too: real motion, drawn free.
+ */
 const MOTION_GRAPHICS =
-  /\bmotion[- ]?graphics?\b|\bmotion design\b|\banimated (?:software |product |saas )?explainer\b|\bkinetic typography\b|\bexplainer animation\b/;
+  /\bmotion[- ]?graphics?\b|\bmotion design\b|\banimated (?:software |product |saas )?explainer\b|\bkinetic typography\b|\bexplainer animation\b|\bexplainer[- ]style\b|\bvox\b|\binfographics?\b|\bflat (?:2d |vector )?(?:motion|graphics|animation|design|illustration)/;
 
 export function wantsMotionGraphics(brief: Pick<Brief, "title" | "prompt" | "style">): boolean {
   return MOTION_GRAPHICS.test(`${brief.title} ${brief.prompt} ${brief.style ?? ""}`.toLowerCase());

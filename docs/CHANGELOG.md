@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.14.1 (2026-11-20)
+
+- "Vox style", infographic, "explainer-style" and flat-2D briefs now get the free
+  `motion_graphics` style (real motion drawn in the browser) instead of AI still images, even
+  when Animation is chosen as the type.
+- Animation-style projects animate their images with paid image-to-video when it is switched on
+  (ADR 042), the same as video-style projects; before, only video-style projects did. The note
+  shown when no animator is on now says how to get free motion.
+- Narration: when a Kokoro line runs out of time or the worker crashes, the render starts a fresh
+  worker, reloads the voice and retries the line (at most twice per render) instead of dropping
+  the narration for every scene after it.
+
 ## 1.14.0 (2026-11-15)
 
 - Graphics scenes (Task 11, ADR 048): motion-graphics explainers drawn in the browser, in the

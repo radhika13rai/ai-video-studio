@@ -53,6 +53,30 @@ describe("director: motion graphics", () => {
     expect(wantsMotionGraphics({ ...brief, prompt: "Whales", style: "kinetic typography" })).toBe(
       true,
     );
+    // "Vox style", infographic and flat-2D briefs are motion graphics too.
+    for (const prompt of [
+      "a person editing video vox style",
+      "Vox-style explainer on inflation",
+      "Infographic video about rainfall",
+      "flat 2D animation of the water cycle",
+      "explainer-style video on taxes",
+    ])
+      expect(wantsMotionGraphics({ ...brief, prompt }), prompt).toBe(true);
+    for (const prompt of [
+      "A cartoon fox finds a lost star",
+      "Voxel art castle tour",
+      "Flat earth myths debunked",
+    ])
+      expect(wantsMotionGraphics({ ...brief, prompt }), prompt).toBe(false);
+    // Even with "Animation" chosen as the type, a Vox brief gets graphics scenes.
+    const vox = runDirector({
+      ...brief,
+      title: "how to edit youtube shorts",
+      prompt: "a person editing video vox style",
+      video_type: "animation",
+    }).output;
+    expect(vox.visual_style).toBe("motion_graphics");
+    expect(vox.capabilities).not.toContain("video");
     const plan = runDirector(brief).output;
     expect(plan.visual_style).toBe("motion_graphics");
     expect(plan.video_type).toBe("explainer");

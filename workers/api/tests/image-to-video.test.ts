@@ -259,7 +259,7 @@ describe("animating scene images in production", () => {
     return p as AsyncMediaProvider & { submitted: MediaRequest[] };
   }
 
-  async function produce() {
+  async function produce(video_type: "cinematic" | "animation" = "cinematic") {
     await using introspector = await introspectWorkflow(env.PRODUCTION_WORKFLOW);
     await introspector.modifyAll(async (m) => {
       await m.disableSleeps();
@@ -269,7 +269,7 @@ describe("animating scene images in production", () => {
       body: JSON.stringify({
         title: "Deep",
         prompt: "Jellyfish film",
-        video_type: "cinematic",
+        video_type,
         duration_seconds: 15,
       }),
     });
@@ -317,6 +317,22 @@ describe("animating scene images in production", () => {
     });
   }, 30_000);
 
+  it("animates the images of animation-style projects too", async () => {
+    setTextModelOverride(scripted(SCRIPT, BOARD));
+    const anim = animator("free");
+    setMediaProvidersOverride([image(), anim]);
+    const { projectId, userId } = await produce("animation");
+    expect((await requireProject(env.DB, userId, projectId)).production_config.plan).toMatchObject({
+      visual_style: "animation",
+    });
+    expect(anim.submitted).toHaveLength(2);
+    const assets = await listAssets(env.DB, userId, projectId);
+    expect(assets.map((a) => a.asset_type).sort()).toEqual(["image", "image", "video", "video"]);
+    expect((await requireProject(env.DB, userId, projectId)).production_config.fallbacks).toEqual(
+      [],
+    );
+  }, 30_000);
+
   it("never runs a paid animator while paid generation is off", async () => {
     setTextModelOverride(scripted(SCRIPT, BOARD));
     const anim = animator("paid");
@@ -355,5 +371,31 @@ describe("motion notes", () => {
     expect(notes).toEqual([
       "2 of 3 scenes have real motion (stock footage or an animated image); the others use generated still images with motion effects (over today's budget).",
     ]);
+  });
+
+  it("reports animation-style motion and says how to get free motion when none is on", async () => {
+    const { summarizeFallbacks } = await import("../src/workflows/media");
+    const ok = { status: "ok" as const, asset_id: "a", provider: "p" };
+    const skip = { status: "skipped" as const, reason: "-" };
+    expect(
+      summarizeFallbacks("animation", false, [
+        { scene: 1, image: ok, voice: skip, video: skip, animated: ok },
+        {
+          scene: 2,
+          image: ok,
+          voice: skip,
+          video: skip,
+          animated: { status: "fallback", reason: "over today's budget" },
+        },
+      ]),
+    ).toEqual([
+      "1 of 2 scenes have real motion (an animated image); the others use generated still images with motion effects (over today's budget).",
+    ]);
+    expect(summarizeFallbacks("animation", false, [{ scene: 1, image: ok, voice: skip }])).toEqual([
+      "No animation generator is switched on (paid image-to-video is off); scenes use generated still images with motion effects instead. For free real motion, ask for motion graphics or a Vox-style explainer.",
+    ]);
+    expect(
+      summarizeFallbacks("animation", false, [{ scene: 1, image: ok, voice: skip, animated: ok }]),
+    ).toEqual([]);
   });
 });
