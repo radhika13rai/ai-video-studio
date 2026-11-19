@@ -228,6 +228,16 @@ h3 {
   border-color: var(--text);
   color: #fff;
 }
+.style-chips {
+  margin: 4px 0 8px;
+}
+.chip-tag {
+  color: var(--ok);
+  font-weight: 600;
+}
+.chip.active .chip-tag {
+  color: #bbf7d0;
+}
 
 /* Cards and grid */
 .card {

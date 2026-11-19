@@ -1,4 +1,4 @@
-import { createProjectRequestSchema } from "@avs/schemas";
+import { createProjectRequestSchema, mentionsMotionGraphics } from "@avs/schemas";
 import {
   ASPECT_RATIOS,
   LIMITS,
@@ -20,6 +20,19 @@ const RATIO_HELP: Record<AspectRatio, string> = {
   "1:1": "Square · feeds",
 };
 const PROMPT_MAX = 4000;
+
+/**
+ * One-tap styles. The first three ask for motion graphics (ADR 048): drawn in the browser with
+ * real motion, no AI pictures, free.
+ */
+export const STYLE_SUGGESTIONS: { label: string; value: string }[] = [
+  { label: "Motion graphics", value: "motion graphics" },
+  { label: "Vox-style explainer", value: "Vox-style explainer" },
+  { label: "Infographic", value: "infographic" },
+  { label: "Cinematic", value: "premium cinematic" },
+  { label: "Playful", value: "playful" },
+  { label: "Minimal", value: "minimal" },
+];
 
 interface Form {
   title: string;
@@ -192,18 +205,42 @@ export function NewProjectPage() {
           />
         </label>
 
-        <label className="field">
-          <span>
+        <div className="field">
+          <label htmlFor="style">
             Style <em className="muted">(optional)</em>
-          </span>
+          </label>
+          <div className="chips style-chips" role="group" aria-label="Style suggestions">
+            {STYLE_SUGGESTIONS.map((s) => {
+              const active = form.style.trim().toLowerCase() === s.value.toLowerCase();
+              return (
+                <button
+                  key={s.value}
+                  type="button"
+                  className={`chip${active ? " active" : ""}`}
+                  aria-pressed={active}
+                  onClick={() => set("style", active ? "" : s.value)}
+                >
+                  {s.label}
+                  {mentionsMotionGraphics(s.value) && <span className="chip-tag"> · free</span>}
+                </button>
+              );
+            })}
+          </div>
           <input
+            id="style"
             name="style"
             value={form.style}
             maxLength={200}
-            placeholder="e.g. premium cinematic, playful, minimal"
+            placeholder="Tap a style above, or type your own"
             onChange={(e) => set("style", e.target.value)}
           />
-        </label>
+          {mentionsMotionGraphics(`${form.prompt} ${form.style}`) && (
+            <small className="muted" role="status">
+              Motion graphics: animated headlines, cards and checklists drawn with real motion. No
+              AI pictures are made, so it&apos;s free and quicker.
+            </small>
+          )}
+        </div>
 
         {serverError && <ErrorBox message={serverError} />}
 

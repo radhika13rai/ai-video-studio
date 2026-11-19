@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.14.2 (2026-11-19)
+
+- New video form: one-tap style suggestions under Style (Motion graphics, Vox-style explainer,
+  Infographic, Cinematic, Playful, Minimal). The first three are marked free, and a note explains
+  the motion-graphics look whenever the brief or style asks for it (typed or tapped). The words
+  that trigger it are now shared by the form and the director.
+
 ## 1.14.1 (2026-11-20)
 
 - "Vox style", infographic, "explainer-style" and flat-2D briefs now get the free

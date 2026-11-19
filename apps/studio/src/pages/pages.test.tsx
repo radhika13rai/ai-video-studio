@@ -122,7 +122,7 @@ describe("new project form", () => {
       "Three facts about Mars",
     );
     await userEvent.click(screen.getByLabelText(/16:9/));
-    await userEvent.type(screen.getByLabelText(/Style/), "documentary");
+    await userEvent.type(screen.getByRole("textbox", { name: /Style/ }), "documentary");
     await userEvent.click(screen.getByRole("button", { name: "Create project" }));
 
     await waitFor(() => expect(location.pathname).toBe(`/projects/${created.id}`));
@@ -138,6 +138,63 @@ describe("new project form", () => {
       /^[0-9a-f-]{36}$/,
     );
     expect(await screen.findByRole("heading", { name: /Mars/ })).toBeTruthy();
+  });
+
+  it("offers one-tap styles and says motion graphics is free", async () => {
+    const created = makeProject({ title: "Taxes" });
+    const calls = stubApi(
+      me,
+      route("POST", API_PATHS.projects, () => ok(created, 201)),
+      route("GET", API_PATHS.project(created.id), () => ok(created)),
+      progressRoutes(),
+    );
+    goTo("/projects/new");
+    render(<App />);
+    await userEvent.type(await screen.findByLabelText("Title"), "Taxes");
+    await userEvent.type(
+      screen.getByLabelText("What should the video be about?"),
+      "How taxes work",
+    );
+    const chips = within(screen.getByRole("group", { name: "Style suggestions" }));
+    expect(chips.getAllByRole("button").map((b) => b.textContent)).toEqual([
+      "Motion graphics · free",
+      "Vox-style explainer · free",
+      "Infographic · free",
+      "Cinematic",
+      "Playful",
+      "Minimal",
+    ]);
+    const style = screen.getByRole("textbox", { name: /Style/ }) as HTMLInputElement;
+    expect(screen.queryByRole("status")).toBeNull();
+
+    await userEvent.click(chips.getByRole("button", { name: /Cinematic/ }));
+    expect(style.value).toBe("premium cinematic");
+    expect(screen.queryByRole("status")).toBeNull();
+    // Tapping the active chip clears it; another chip replaces it.
+    await userEvent.click(chips.getByRole("button", { name: /Cinematic/ }));
+    expect(style.value).toBe("");
+    await userEvent.click(chips.getByRole("button", { name: /Vox-style/ }));
+    expect(style.value).toBe("Vox-style explainer");
+    expect(chips.getByRole("button", { name: /Vox-style/ }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    expect(screen.getByRole("status").textContent).toMatch(/No AI pictures are made, so it.s free/);
+
+    await userEvent.click(screen.getByRole("button", { name: "Create project" }));
+    await waitFor(() => expect(location.pathname).toBe(`/projects/${created.id}`));
+    const post = calls.find((c) => c.init.method === "POST");
+    expect(JSON.parse(String(post?.init.body))).toMatchObject({ style: "Vox-style explainer" });
+  });
+
+  it("notes motion graphics typed in the description too", async () => {
+    stubApi(me);
+    goTo("/projects/new");
+    render(<App />);
+    await userEvent.type(
+      await screen.findByLabelText("What should the video be about?"),
+      "An infographic video about rainfall",
+    );
+    expect(screen.getByRole("status").textContent).toMatch(/Motion graphics/);
   });
 
   it("shows the server's error message", async () => {
