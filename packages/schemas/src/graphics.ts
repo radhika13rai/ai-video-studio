@@ -118,6 +118,18 @@ export const DEFAULT_GRAPHICS_THEME: GraphicsTheme = {
   mascot: true,
 };
 
+/**
+ * Words in a brief that ask for motion graphics (ADR 048): such projects get graphics scenes,
+ * drawn free in the browser, instead of AI pictures. Shared by the director and the new-video
+ * form (which shows that the look is free).
+ */
+export const MOTION_GRAPHICS_PATTERN =
+  /\bmotion[- ]?graphics?\b|\bmotion design\b|\banimated (?:software |product |saas )?explainer\b|\bkinetic typography\b|\bexplainer animation\b|\bexplainer[- ]style\b|\bvox\b|\binfographics?\b|\bflat (?:2d |vector )?(?:motion|graphics|animation|design|illustration)/;
+
+export function mentionsMotionGraphics(text: string): boolean {
+  return MOTION_GRAPHICS_PATTERN.test(text.toLowerCase());
+}
+
 /* ------------------------------ deterministic fallback ------------------------------ */
 
 export interface GraphicsFallbackInput {
