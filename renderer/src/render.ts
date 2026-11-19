@@ -15,7 +15,7 @@ import {
   type Quality,
   type TimedScene,
 } from "./timeline";
-import { startModelWorker, type ModelWorker } from "./ml";
+import { startModelWorker } from "./ml";
 import { BACKUP_VOICE, DEFAULT_VOICE, fitSpeed, type Speech } from "./voice";
 import { clipTime, loadClip, sfxCues, type VideoClip } from "./video";
 import {
@@ -26,6 +26,7 @@ import {
   withDurations,
 } from "./prepare";
 import { browserVoiceCache, speechKey, type VoiceCache } from "./voice-cache";
+import { RestartingVoiceWorker, type VoiceWorker } from "./voice-worker";
 
 export type RenderStage = "loading" | "frames" | "audio" | "encoding" | "done";
 
@@ -389,9 +390,19 @@ async function voiceScenes(
     }),
   );
   const wantKokoro = useKokoro && scenes.some((s, i) => s.narration?.trim() && !cached[i]);
-  let worker: ModelWorker | null = null;
+  let worker: VoiceWorker | null = null;
   if (wantKokoro) {
-    worker = startModelWorker();
+    const first = startModelWorker();
+    // One slow or crashed line used to stop the worker for every scene after it; a restarting
+    // worker replaces it (bounded) so the rest of the narration still gets voiced.
+    worker = first
+      ? new RestartingVoiceWorker(first, {
+          start: startModelWorker,
+          loadVoiceMs: lim.loadVoice,
+          retrySpeechMs: lim.firstSpeech,
+          onRestart: (reason) => notes.push(`Kokoro voice restarted (${reason}).`),
+        })
+      : null;
     if (!worker)
       notes.push("This browser can't run background workers, so the Kokoro voice can't run.");
     else {

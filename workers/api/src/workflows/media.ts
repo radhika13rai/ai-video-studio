@@ -278,12 +278,14 @@ export function summarizeFallbacks(
   const triedAnimation = outcomes.filter((o) => tried(o.animated));
   // A scene has real motion with stock footage or an animated image.
   const moving = (o: SceneOutcome) => o.video?.status === "ok" || o.animated?.status === "ok";
-  if (visualStyle === "video" && triedAnimation.length > 0) {
+  if ((visualStyle === "video" || visualStyle === "animation") && triedAnimation.length > 0) {
     const eligible = outcomes.filter((o) => tried(o.video) || tried(o.animated));
     const failed = eligible.find((o) => !moving(o));
+    const source =
+      visualStyle === "video" ? "stock footage or an animated image" : "an animated image";
     if (failed)
       notes.push(
-        `${eligible.filter(moving).length} of ${eligible.length} scenes have real motion (stock footage or an animated image); the others use generated still images with motion effects (${reasonOf(failed.animated?.status === "fallback" ? failed.animated : failed.video)}).`,
+        `${eligible.filter(moving).length} of ${eligible.length} scenes have real motion (${source}); the others use generated still images with motion effects (${reasonOf(failed.animated?.status === "fallback" ? failed.animated : failed.video)}).`,
       );
   } else if (visualStyle === "video" && triedVideo.length > 0) {
     const withVideo = triedVideo.filter((o) => o.video?.status === "ok");
@@ -295,7 +297,7 @@ export function summarizeFallbacks(
     notes.push(
       visualStyle === "video"
         ? "No video source is set up (add a free Pexels key for stock footage); scenes use generated still images with motion effects instead."
-        : "No animation generator is available on the free tier; scenes use generated still images with motion effects instead.",
+        : "No animation generator is switched on (paid image-to-video is off); scenes use generated still images with motion effects instead. For free real motion, ask for motion graphics or a Vox-style explainer.",
     );
   const noImage = outcomes.filter((o) => o.image.status === "fallback");
   if (noImage.length > 0)

@@ -366,9 +366,10 @@ export class ProductionWorkflow extends WorkflowEntrypoint<Env, ProductionParams
             ? await step.do("video-plan", async () => hasCodeProvider(this.env, "video"))
             : false;
 
-        // Paid image-to-video, only when switched on with a budget and a key (ADR 042).
+        // Paid image-to-video, only when switched on with a budget and a key (ADR 042). Video- and
+        // animation-style projects both want real motion, so both animate their images.
         const useAnimation =
-          mediaV2 && plan.visual_style === "video"
+          mediaV2 && (plan.visual_style === "video" || plan.visual_style === "animation")
             ? await step.do("animate-plan", async () => hasCodeProvider(this.env, "image_to_video"))
             : false;
 
